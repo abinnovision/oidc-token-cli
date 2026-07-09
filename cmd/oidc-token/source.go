@@ -5,6 +5,7 @@ import (
 
 	"github.com/abinnovision/oidc-token-cli/internal/authflow"
 	"github.com/abinnovision/oidc-token-cli/internal/config"
+	"github.com/abinnovision/oidc-token-cli/internal/oidc"
 	"github.com/abinnovision/oidc-token-cli/internal/runner"
 )
 
@@ -23,5 +24,12 @@ func newRealSource(cfg *config.Config) runner.TokenSource {
 		OpenBrowser:    authflow.OpenBrowser,
 		// Prompt output must never land on stdout, like any other non-token byte.
 		Prompt: os.Stderr,
+
+		ClientAuthMethod:        oidc.ClientAuthMethod(cfg.ClientAuthMethod),
+		ClientSecret:            cfg.ClientSecret,
+		PrivateKey:              cfg.PrivateKey,
+		PrivateKeyID:            cfg.PrivateKeyID,
+		PrivateKeySigningAlg:    cfg.SigningAlg(),
+		ClientAssertionAudience: cfg.ClientAssertionAudience,
 	}
 }

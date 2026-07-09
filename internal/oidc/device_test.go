@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	jose "github.com/go-jose/go-jose/v4"
+
 	"github.com/abinnovision/oidc-token-cli/internal/oidctest"
 )
 
@@ -103,5 +105,51 @@ func TestDeviceLogin_ExplicitlyExcludedGrant_ClearError(t *testing.T) {
 	_, err = p.DeviceLogin(context.Background(), "openid", &prompt)
 	if err == nil {
 		t.Fatal("expected an error when grant_types_supported explicitly excludes device-code")
+	}
+}
+
+func TestDeviceLogin_PrivateKeyJWT_Success(t *testing.T) {
+	m := oidctest.NewMockIssuer(t)
+	m.IncludeIDToken = true
+	key := generateTestKey(t)
+	m.RequireClientAuth = "private_key_jwt"
+	m.ExpectedAssertionKey = &key.PublicKey
+
+	p, err := Discover(context.Background(), m.Issuer(), oidctest.ClientID)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	p.SetClientAuth(ClientAuthPrivateKeyJWT, "", key, "", jose.RS256, "")
+
+	var prompt bytes.Buffer
+	res, err := p.DeviceLogin(context.Background(), "openid offline_access", &prompt)
+	if err != nil {
+		t.Fatalf("DeviceLogin: %v", err)
+	}
+	if res.AccessToken == "" {
+		t.Fatal("expected a non-empty access_token")
+	}
+	if len(m.AssertionJTIs()) != 1 {
+		t.Fatalf("expected exactly one verified client assertion, got %d", len(m.AssertionJTIs()))
+	}
+}
+
+func TestDeviceLogin_PrivateKeyJWT_WrongKey_Rejected(t *testing.T) {
+	m := oidctest.NewMockIssuer(t)
+	signingKey := generateTestKey(t)
+	otherKey := generateTestKey(t)
+	m.RequireClientAuth = "private_key_jwt"
+	m.ExpectedAssertionKey = &otherKey.PublicKey
+
+	p, err := Discover(context.Background(), m.Issuer(), oidctest.ClientID)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	p.SetClientAuth(ClientAuthPrivateKeyJWT, "", signingKey, "", jose.RS256, "")
+
+	var prompt bytes.Buffer
+	_, err = p.DeviceLogin(context.Background(), "openid", &prompt)
+	if err == nil {
+		t.Fatal("expected an error for an assertion signed with the wrong key")
 	}
 }

@@ -2,11 +2,13 @@ package authflow
 
 import (
 	"context"
+	"crypto"
 	"errors"
 	"fmt"
 	"io"
 	"sync"
 
+	jose "github.com/go-jose/go-jose/v4"
 	upstream "golang.org/x/oauth2"
 
 	"github.com/abinnovision/oidc-token-cli/internal/oidc"
@@ -62,6 +64,7 @@ type grantSource interface {
 	DeviceLogin(ctx context.Context, scope string, prompt io.Writer) (output.Result, error)
 	AuthCodeLogin(ctx context.Context, scope string, port int, openBrowser func(string) error, prompt, hint io.Writer) (output.Result, error)
 	Refresh(ctx context.Context, scope, refreshToken string) (output.Result, error)
+	SetClientAuth(method oidc.ClientAuthMethod, secret string, signer crypto.Signer, keyID string, alg jose.SignatureAlgorithm, audience string)
 }
 
 // negotiationDiagnostic renders the actual negotiation state — what the
@@ -206,6 +209,16 @@ type Source struct {
 	// warnings. Must never be stdout.
 	Prompt io.Writer
 
+	// Client-authentication configuration for the token endpoint.
+	// ClientAuthMethod == "" (oidc.ClientAuthNone) is a public client,
+	// this tool's original and still default behavior.
+	ClientAuthMethod        oidc.ClientAuthMethod
+	ClientSecret            string
+	PrivateKey              crypto.Signer
+	PrivateKeyID            string
+	PrivateKeySigningAlg    jose.SignatureAlgorithm
+	ClientAssertionAudience string
+
 	mu       sync.Mutex
 	provider grantSource
 	// discoverFunc is overridden in tests to inject a fake grantSource
@@ -228,6 +241,7 @@ func (s *Source) discover(ctx context.Context) (grantSource, error) {
 		return nil, err
 	}
 	p.SetAudience(s.Audience)
+	p.SetClientAuth(s.ClientAuthMethod, s.ClientSecret, s.PrivateKey, s.PrivateKeyID, s.PrivateKeySigningAlg, s.ClientAssertionAudience)
 	s.provider = p
 	return p, nil
 }

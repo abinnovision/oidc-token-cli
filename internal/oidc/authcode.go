@@ -96,7 +96,14 @@ func (p *Provider) AuthCodeLogin(ctx context.Context, scope string, port int, op
 		return output.Result{}, err
 	}
 
-	tok, err := cfg.Exchange(ctx, code, oauth2.VerifierOption(verifier))
+	exchangeOpts := []oauth2.AuthCodeOption{oauth2.VerifierOption(verifier)}
+	assertionOpts, err := p.clientAssertionOptions(clientAssertionLifetime)
+	if err != nil {
+		return output.Result{}, err
+	}
+	exchangeOpts = append(exchangeOpts, assertionOpts...)
+
+	tok, err := cfg.Exchange(ctx, code, exchangeOpts...)
 	if err != nil {
 		return output.Result{}, fmt.Errorf("oidc: authorization code exchange failed: %w", err)
 	}

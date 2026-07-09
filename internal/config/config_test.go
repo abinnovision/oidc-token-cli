@@ -2,13 +2,37 @@ package config
 
 import (
 	"bytes"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/abinnovision/oidc-token-cli/internal/cache"
 )
+
+// writeTestPrivateKeyPEM generates an RSA key, PEM-encodes it as PKCS#8, and
+// writes it to a file in t.TempDir(), returning the file path.
+func writeTestPrivateKeyPEM(t *testing.T) string {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatalf("marshal key: %v", err)
+	}
+	block := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
+	path := filepath.Join(t.TempDir(), "key.pem")
+	if err := os.WriteFile(path, block, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
 
 func noEnv(string) string { return "" }
 
@@ -215,5 +239,167 @@ func TestParse_LogoutEnv(t *testing.T) {
 	}
 	if !cfg.Logout {
 		t.Error("Logout = false, want true from env")
+	}
+}
+
+func TestParse_ClientAuthMethod_InvalidMethod(t *testing.T) {
+	var stderr bytes.Buffer
+	_, err := Parse([]string{
+		"--issuer=https://issuer.example", "--client-id=cid", "--client-auth-method=bogus",
+	}, &stderr, Env{Getenv: noEnv})
+	if err == nil {
+		t.Fatal("expected error for invalid --client-auth-method")
+	}
+}
+
+func TestParse_ClientSecretBasic_RequiresSecret(t *testing.T) {
+	var stderr bytes.Buffer
+	_, err := Parse([]string{
+		"--issuer=https://issuer.example", "--client-id=cid", "--client-auth-method=client_secret_basic",
+	}, &stderr, Env{Getenv: noEnv})
+	if err == nil {
+		t.Fatal("expected error when client_secret_basic is selected without --client-secret")
+	}
+}
+
+func TestParse_ClientSecretBasic_WithSecret(t *testing.T) {
+	var stderr bytes.Buffer
+	cfg, err := Parse([]string{
+		"--issuer=https://issuer.example", "--client-id=cid",
+		"--client-auth-method=client_secret_basic", "--client-secret=s3cr3t",
+	}, &stderr, Env{Getenv: noEnv})
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.ClientAuthMethod != ClientAuthSecretBasic {
+		t.Errorf("ClientAuthMethod = %q, want %q", cfg.ClientAuthMethod, ClientAuthSecretBasic)
+	}
+	if cfg.ClientSecret != "s3cr3t" {
+		t.Errorf("ClientSecret = %q, want %q", cfg.ClientSecret, "s3cr3t")
+	}
+}
+
+func TestParse_ClientSecretFile_TakesPrecedenceOverFlag(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "secret")
+	if err := os.WriteFile(path, []byte("file-secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	cfg, err := Parse([]string{
+		"--issuer=https://issuer.example", "--client-id=cid",
+		"--client-auth-method=client_secret_post",
+		"--client-secret=flag-secret",
+		"--client-secret-file=" + path,
+	}, &stderr, Env{Getenv: noEnv})
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.ClientSecret != "file-secret" {
+		t.Errorf("ClientSecret = %q, want the file's contents (trailing newline trimmed) to win over --client-secret", cfg.ClientSecret)
+	}
+}
+
+func TestParse_ClientSecretWithoutMethod_Errors(t *testing.T) {
+	var stderr bytes.Buffer
+	_, err := Parse([]string{
+		"--issuer=https://issuer.example", "--client-id=cid", "--client-secret=s3cr3t",
+	}, &stderr, Env{Getenv: noEnv})
+	if err == nil {
+		t.Fatal("expected error when --client-secret is set without --client-auth-method")
+	}
+}
+
+func TestParse_PrivateKeyJWT_RequiresKeyFile(t *testing.T) {
+	var stderr bytes.Buffer
+	_, err := Parse([]string{
+		"--issuer=https://issuer.example", "--client-id=cid", "--client-auth-method=private_key_jwt",
+	}, &stderr, Env{Getenv: noEnv})
+	if err == nil {
+		t.Fatal("expected error when private_key_jwt is selected without --private-key-file")
+	}
+}
+
+func TestParse_PrivateKeyJWT_InvalidAlg(t *testing.T) {
+	path := writeTestPrivateKeyPEM(t)
+	var stderr bytes.Buffer
+	_, err := Parse([]string{
+		"--issuer=https://issuer.example", "--client-id=cid",
+		"--client-auth-method=private_key_jwt", "--private-key-file=" + path, "--private-key-alg=bogus",
+	}, &stderr, Env{Getenv: noEnv})
+	if err == nil {
+		t.Fatal("expected error for invalid --private-key-alg")
+	}
+}
+
+func TestParse_PrivateKeyJWT_ParsesKeyAndDefaultsAlg(t *testing.T) {
+	path := writeTestPrivateKeyPEM(t)
+	var stderr bytes.Buffer
+	cfg, err := Parse([]string{
+		"--issuer=https://issuer.example", "--client-id=cid",
+		"--client-auth-method=private_key_jwt", "--private-key-file=" + path,
+	}, &stderr, Env{Getenv: noEnv})
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.PrivateKeySigningAlg != DefaultPrivateKeySigningAlg {
+		t.Errorf("PrivateKeySigningAlg = %q, want default %q", cfg.PrivateKeySigningAlg, DefaultPrivateKeySigningAlg)
+	}
+	if cfg.PrivateKey == nil {
+		t.Fatal("expected PrivateKeyPath to be parsed into a non-nil crypto.Signer")
+	}
+}
+
+func TestParse_PrivateKeyJWT_BadPEM_Errors(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "key.pem")
+	if err := os.WriteFile(path, []byte("not a pem file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	_, err := Parse([]string{
+		"--issuer=https://issuer.example", "--client-id=cid",
+		"--client-auth-method=private_key_jwt", "--private-key-file=" + path,
+	}, &stderr, Env{Getenv: noEnv})
+	if err == nil {
+		t.Fatal("expected error for a malformed --private-key-file")
+	}
+}
+
+func TestParse_ClientAuthMethod_EnvOverridesDefaults(t *testing.T) {
+	path := writeTestPrivateKeyPEM(t)
+	env := envFrom(map[string]string{
+		"OIDC_TOKEN_CLIENT_AUTH_METHOD": "private_key_jwt",
+		"OIDC_TOKEN_PRIVATE_KEY_FILE":   path,
+		"OIDC_TOKEN_PRIVATE_KEY_ID":     "kid-from-env",
+		"OIDC_TOKEN_PRIVATE_KEY_ALG":    "ES256",
+	})
+	var stderr bytes.Buffer
+	cfg, err := Parse([]string{"--issuer=https://issuer.example", "--client-id=cid"}, &stderr, Env{Getenv: env})
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.ClientAuthMethod != ClientAuthPrivateKeyJWT {
+		t.Errorf("ClientAuthMethod = %q, want env override", cfg.ClientAuthMethod)
+	}
+	if cfg.PrivateKeyID != "kid-from-env" {
+		t.Errorf("PrivateKeyID = %q, want env override", cfg.PrivateKeyID)
+	}
+	if cfg.PrivateKeySigningAlg != "ES256" {
+		t.Errorf("PrivateKeySigningAlg = %q, want env override", cfg.PrivateKeySigningAlg)
+	}
+}
+
+func TestParse_ClientAssertionAudience_FlagOverride(t *testing.T) {
+	path := writeTestPrivateKeyPEM(t)
+	var stderr bytes.Buffer
+	cfg, err := Parse([]string{
+		"--issuer=https://issuer.example", "--client-id=cid",
+		"--client-auth-method=private_key_jwt", "--private-key-file=" + path,
+		"--client-assertion-audience=https://issuer.example/custom-aud",
+	}, &stderr, Env{Getenv: noEnv})
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.ClientAssertionAudience != "https://issuer.example/custom-aud" {
+		t.Errorf("ClientAssertionAudience = %q, want override", cfg.ClientAssertionAudience)
 	}
 }

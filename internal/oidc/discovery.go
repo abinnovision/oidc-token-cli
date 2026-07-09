@@ -30,6 +30,8 @@ type Provider struct {
 	upstream *upstream.Provider
 	verifier *upstream.IDTokenVerifier
 	claims   discoveryClaims
+
+	clientAuth clientAuth
 }
 
 // Discover fetches and validates issuer's discovery document. The issuer
@@ -147,9 +149,11 @@ func (p *Provider) codeChallengeMethod() (string, error) {
 func (p *Provider) oauth2Config(scope string) *oauth2.Config {
 	ep := p.upstream.Endpoint()
 	ep.DeviceAuthURL = p.claims.DeviceAuthorizationEndpoint
-	return &oauth2.Config{
+	cfg := &oauth2.Config{
 		ClientID: p.ClientID,
 		Endpoint: ep,
 		Scopes:   strings.Fields(scope),
 	}
+	p.applyClientAuth(cfg)
+	return cfg
 }

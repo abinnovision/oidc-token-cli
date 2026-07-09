@@ -4,6 +4,7 @@
 package oidctest
 
 import (
+	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
@@ -18,6 +19,14 @@ import (
 	jose "github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
 )
+
+// clientAssertionSigningAlgs are the JWS algorithms handleToken accepts
+// when verifying a private_key_jwt client_assertion.
+var clientAssertionSigningAlgs = []jose.SignatureAlgorithm{
+	jose.RS256, jose.RS384, jose.RS512,
+	jose.PS256, jose.PS384, jose.PS512,
+	jose.ES256, jose.ES384, jose.ES512,
+}
 
 // ClientID is the audience baked into mock-issued id_tokens; tests that
 // verify an id_token must Discover using this as their client ID.
@@ -59,6 +68,28 @@ type MockIssuer struct {
 	// session state binding it to the authorization request automatically,
 	// so tests set it directly.
 	NonceForAuthCode string
+
+	// RequireClientAuth, if non-empty ("client_secret_basic",
+	// "client_secret_post", or "private_key_jwt"), makes handleToken
+	// reject any token-endpoint request that doesn't authenticate with
+	// that exact method. Empty (the default) is this mock's original,
+	// permissive behavior: no client authentication is checked.
+	RequireClientAuth    string
+	ExpectedClientSecret string
+	// ExpectedAssertionKey verifies a private_key_jwt client_assertion's
+	// signature; required when RequireClientAuth == "private_key_jwt".
+	ExpectedAssertionKey crypto.PublicKey
+
+	assertionJTIs []string
+}
+
+// AssertionJTIs returns the jti claim of every private_key_jwt client
+// assertion handleToken has successfully verified so far, in call order --
+// used to assert freshness (no two calls reuse a jti).
+func (m *MockIssuer) AssertionJTIs() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.assertionJTIs...)
 }
 
 type mockDeviceCode struct {
@@ -162,6 +193,10 @@ func (m *MockIssuer) handleToken(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad form", http.StatusBadRequest)
 		return
 	}
+	if err := m.checkClientAuth(r); err != nil {
+		writeTokenError(w, http.StatusUnauthorized, "invalid_client")
+		return
+	}
 	switch r.Form.Get("grant_type") {
 	case "urn:ietf:params:oauth:grant-type:device_code":
 		m.handleDeviceToken(w, r)
@@ -172,6 +207,63 @@ func (m *MockIssuer) handleToken(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeTokenError(w, http.StatusBadRequest, "unsupported_grant_type")
 	}
+}
+
+// checkClientAuth enforces RequireClientAuth against r, which must already
+// have ParseForm called on it. A nil error means the request authenticated
+// correctly (or RequireClientAuth is unset).
+func (m *MockIssuer) checkClientAuth(r *http.Request) error {
+	switch m.RequireClientAuth {
+	case "":
+		return nil
+	case "client_secret_basic":
+		id, secret, ok := r.BasicAuth()
+		if !ok || id != ClientID || secret != m.ExpectedClientSecret {
+			return fmt.Errorf("bad client_secret_basic credentials")
+		}
+		return nil
+	case "client_secret_post":
+		if r.Form.Get("client_id") != ClientID || r.Form.Get("client_secret") != m.ExpectedClientSecret {
+			return fmt.Errorf("bad client_secret_post credentials")
+		}
+		return nil
+	case "private_key_jwt":
+		return m.checkClientAssertion(r)
+	default:
+		return fmt.Errorf("mock issuer: unknown RequireClientAuth %q", m.RequireClientAuth)
+	}
+}
+
+func (m *MockIssuer) checkClientAssertion(r *http.Request) error {
+	const wantType = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
+	if r.Form.Get("client_assertion_type") != wantType {
+		return fmt.Errorf("bad client_assertion_type")
+	}
+	assertion := r.Form.Get("client_assertion")
+	if assertion == "" {
+		return fmt.Errorf("missing client_assertion")
+	}
+	tok, err := jwt.ParseSigned(assertion, clientAssertionSigningAlgs)
+	if err != nil {
+		return fmt.Errorf("parse client_assertion: %w", err)
+	}
+	var claims jwt.Claims
+	if err := tok.Claims(m.ExpectedAssertionKey, &claims); err != nil {
+		return fmt.Errorf("verify client_assertion signature: %w", err)
+	}
+	if claims.Issuer != ClientID || claims.Subject != ClientID {
+		return fmt.Errorf("bad iss/sub claim")
+	}
+	if claims.ID == "" {
+		return fmt.Errorf("missing jti claim")
+	}
+	if err := claims.Validate(jwt.Expected{}); err != nil {
+		return fmt.Errorf("invalid claims: %w", err)
+	}
+	m.mu.Lock()
+	m.assertionJTIs = append(m.assertionJTIs, claims.ID)
+	m.mu.Unlock()
+	return nil
 }
 
 func (m *MockIssuer) handleAuthCodeToken(w http.ResponseWriter, r *http.Request) {

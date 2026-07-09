@@ -27,6 +27,13 @@ staticClients:
   # the client's own registered callback; it must be pre-registered too or
   # dex 400s with "Unregistered redirect_uri".
   - /device/callback
+- id: {{.ConfidentialClientID}}
+  secret: {{.ConfidentialClientSecret}}
+  public: false
+  name: "oidc-token-cli e2e (confidential)"
+  redirectURIs:
+  - {{.RedirectURI}}
+  - /device/callback
 
 enablePasswordDB: true
 staticPasswords:

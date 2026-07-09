@@ -27,6 +27,15 @@ const dexImage = "dexidp/dex:v2.42.0"
 // rendered dex config.
 const dexClientID = "oidc-token-cli-e2e"
 
+// dexConfidentialClientID is the confidential (client_secret_basic/post)
+// client registered alongside dexClientID in every rendered dex config.
+const dexConfidentialClientID = "oidc-token-cli-e2e-confidential"
+
+// dexConfidentialClientSecret is the fixture secret dex is configured to
+// expect from dexConfidentialClientID; not a real secret, since dex only
+// ever runs inside an ephemeral test container.
+const dexConfidentialClientSecret = "dex-e2e-test-client-secret"
+
 const dexUsername = "e2e@example.com"
 
 // dexPassword is the fixture password whose bcrypt hash is baked into
@@ -44,7 +53,7 @@ const dexPasswordHash = "$2a$10$Ct.NVXKFV0w9gqKgD3ULwulcsXO32W9kg4ceKWX4Z6IYgEfA
 // port.
 const maxStartDexAttempts = 3
 
-// DexInstance describes a running dex container and the fixture client it
+// DexInstance describes a running dex container and the fixture clients it
 // was configured with.
 type DexInstance struct {
 	IssuerURL    string
@@ -54,17 +63,25 @@ type DexInstance struct {
 	RedirectURI  string
 	RedirectPort int
 
+	// ConfidentialClientID/ConfidentialClientSecret identify the second,
+	// non-public static client registered alongside ClientID, for
+	// client_secret_basic/client_secret_post e2e coverage.
+	ConfidentialClientID     string
+	ConfidentialClientSecret string
+
 	container testcontainers.Container
 }
 
 var dexConfigTmpl = template.Must(template.ParseFiles(filepath.Join("testdata", "dex-config.yaml.tmpl")))
 
 type dexConfigData struct {
-	DexPort      int
-	ClientID     string
-	RedirectURI  string
-	Username     string
-	PasswordHash string
+	DexPort                  int
+	ClientID                 string
+	ConfidentialClientID     string
+	ConfidentialClientSecret string
+	RedirectURI              string
+	Username                 string
+	PasswordHash             string
 }
 
 // StartDex renders a dex config with ports pre-allocated on the host for
@@ -99,11 +116,13 @@ func startDexOnce(t *testing.T) (*DexInstance, error) {
 	redirectURI := fmt.Sprintf("http://127.0.0.1:%d/callback", cbPort)
 
 	configPath := renderDexConfig(t, dexConfigData{
-		DexPort:      dexPort,
-		ClientID:     dexClientID,
-		RedirectURI:  redirectURI,
-		Username:     dexUsername,
-		PasswordHash: dexPasswordHash,
+		DexPort:                  dexPort,
+		ClientID:                 dexClientID,
+		ConfidentialClientID:     dexConfidentialClientID,
+		ConfidentialClientSecret: dexConfidentialClientSecret,
+		RedirectURI:              redirectURI,
+		Username:                 dexUsername,
+		PasswordHash:             dexPasswordHash,
 	})
 
 	dexContainerPort := network.MustParsePort("5556/tcp")
@@ -143,13 +162,15 @@ func startDexOnce(t *testing.T) (*DexInstance, error) {
 	})
 
 	return &DexInstance{
-		IssuerURL:    fmt.Sprintf("http://127.0.0.1:%d", dexPort),
-		ClientID:     dexClientID,
-		Username:     dexUsername,
-		Password:     dexPassword,
-		RedirectURI:  redirectURI,
-		RedirectPort: cbPort,
-		container:    container,
+		IssuerURL:                fmt.Sprintf("http://127.0.0.1:%d", dexPort),
+		ClientID:                 dexClientID,
+		Username:                 dexUsername,
+		Password:                 dexPassword,
+		RedirectURI:              redirectURI,
+		RedirectPort:             cbPort,
+		ConfidentialClientID:     dexConfidentialClientID,
+		ConfidentialClientSecret: dexConfidentialClientSecret,
+		container:                container,
 	}, nil
 }
 
