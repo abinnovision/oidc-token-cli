@@ -31,3 +31,34 @@ release:
   github:
     owner: abinnovision
     name: oidc-token-cli
+
+brews:
+  - name: oidc-token
+    # Formula (`brews`), not `homebrew_casks`: Casks apply the
+    # com.apple.quarantine xattr on install, which fails Gatekeeper on
+    # first run for an unsigned/un-notarized binary (this build has
+    # CGO_ENABLED=0 and no signing/notarization config). Formula-installed
+    # binaries are not quarantined, so `brews` is the correct target for a
+    # plain CLI like this one. `brews` still works in goreleaser v2 (only
+    # deprecated as goreleaser's own recommended default, not removed).
+    # `goreleaser check` reports this as a deprecation warning (exit
+    # non-zero) even though the config is otherwise valid and `release`
+    # itself still works — that's expected and accepted here in trade for
+    # avoiding the Gatekeeper problem.
+    repository:
+      owner: abinnovision
+      name: homebrew-tap
+      # The primary GITHUB_TOKEN passed to goreleaser only has write access
+      # to this repo. Push credential is a short-lived, least-privilege
+      # token minted per-release by gh-token-broker (scoped only to
+      # abinnovision/homebrew-tap, contents:write) — see ci.yml's
+      # "Fetch homebrew-tap token from gh-token-broker" step. Not a stored PAT.
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/abinnovision/oidc-token-cli"
+    description: "Generic, dynamic OIDC token helper for exec-style credential providers (frpc, kubectl, curl, CI)."
+    license: "Apache-2.0"
+    install: |
+      bin.install "oidc-token"
+    test: |
+      system "#{bin}/oidc-token", "--help"

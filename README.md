@@ -24,7 +24,11 @@ cache is cold.
 
 ## Install
 
-Download a release binary (darwin/linux, amd64/arm64) from the
+```sh
+brew install abinnovision/tap/oidc-token
+```
+
+Or download a release binary (darwin/linux, amd64/arm64) from the
 [releases page](https://github.com/abinnovision/oidc-token-cli/releases).
 
 ## Usage
@@ -276,7 +280,13 @@ go test ./...
 Every push to `main` runs CI; if it's green, [svu](https://github.com/caarlos0/svu)
 derives the next semver from conventional commits and, on a version bump,
 `goreleaser release --clean` builds darwin/linux × amd64/arm64 archives
-plus a GitHub release.
+plus a GitHub release and a Homebrew formula update in
+[`abinnovision/homebrew-tap`](https://github.com/abinnovision/homebrew-tap)
+(push token minted per-release by gh-token-broker, not a stored PAT).
+`.goreleaser.yaml` intentionally uses the `brews` key (not
+`homebrew_casks` — casks get Gatekeeper-quarantined on an unsigned binary);
+`goreleaser check` will report a `brews` deprecation warning, which is
+expected.
 
 ## License
 
