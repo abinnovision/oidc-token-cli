@@ -1,0 +1,39 @@
+# Rendered per-test-run by dex_container.go with ports pre-allocated on the
+# host before the container starts, since dex's issuer and the CLI's
+# loopback redirect URI must both be fixed before either side can discover
+# the other's exact address.
+issuer: http://127.0.0.1:{{.DexPort}}
+
+storage:
+  type: sqlite3
+  config:
+    file: /var/dex/dex.db
+
+web:
+  http: 0.0.0.0:5556
+
+oauth2:
+  skipApprovalScreen: true
+  passwordConnector: local
+
+staticClients:
+- id: {{.ClientID}}
+  public: true
+  name: "oidc-token-cli e2e"
+  redirectURIs:
+  - {{.RedirectURI}}
+  # dex's own device-authorization flow internally redirects here
+  # (relative to the issuer) after the user completes login, regardless of
+  # the client's own registered callback; it must be pre-registered too or
+  # dex 400s with "Unregistered redirect_uri".
+  - /device/callback
+
+enablePasswordDB: true
+staticPasswords:
+- email: "{{.Username}}"
+  # bcrypt hash of a fixed fixture password, precomputed offline; not a
+  # secret worth rotating, since dex only ever runs inside an ephemeral
+  # test container.
+  hash: "{{.PasswordHash}}"
+  username: "{{.Username}}"
+  userID: "08a8684b-db88-4b73-90a9-3cd1661f5466"
