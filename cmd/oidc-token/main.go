@@ -1,4 +1,4 @@
-// Command oidc-token mints and prints an OIDC token for a generic public
+// Command oidc-token-cli mints and prints an OIDC token for a generic public
 // client, using cached credentials and silent refresh where possible.
 //
 // This file is the only place in the program that writes to stdout. On

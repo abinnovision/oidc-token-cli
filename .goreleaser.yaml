@@ -1,6 +1,6 @@
 version: 2
 
-project_name: oidc-token
+project_name: oidc-token-cli
 
 builds:
   - id: oidc-token
