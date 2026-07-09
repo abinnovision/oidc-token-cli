@@ -55,8 +55,8 @@ func TestParse_Defaults(t *testing.T) {
 	if cfg.TokenType != TokenTypeAccessToken {
 		t.Errorf("TokenType = %q, want %q (per V-M2: frp validates the OAuth2 access_token as a JWT)", cfg.TokenType, TokenTypeAccessToken)
 	}
-	if cfg.CacheDir == "" {
-		t.Error("CacheDir must default to a non-empty path")
+	if cfg.TokenStoreDir == "" {
+		t.Error("TokenStoreDir must default to a non-empty path")
 	}
 	if cfg.TokenStore != cache.BackendAuto {
 		t.Errorf("TokenStore = %q, want %q", cfg.TokenStore, cache.BackendAuto)
@@ -151,16 +151,16 @@ func TestParse_InvalidTokenType(t *testing.T) {
 	}
 }
 
-func TestParse_CacheDirOverride(t *testing.T) {
+func TestParse_TokenStoreDirOverride(t *testing.T) {
 	var stderr bytes.Buffer
 	cfg, err := Parse([]string{
-		"--issuer=https://issuer.example", "--client-id=cid", "--cache-dir=/tmp/custom-cache",
+		"--issuer=https://issuer.example", "--client-id=cid", "--token-store-dir=/tmp/custom-cache",
 	}, &stderr, Env{Getenv: noEnv})
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	if cfg.CacheDir != "/tmp/custom-cache" {
-		t.Errorf("CacheDir = %q, want override", cfg.CacheDir)
+	if cfg.TokenStoreDir != "/tmp/custom-cache" {
+		t.Errorf("TokenStoreDir = %q, want override", cfg.TokenStoreDir)
 	}
 }
 
@@ -202,6 +202,35 @@ func TestParse_TokenStoreFlagOverridesEnv(t *testing.T) {
 	}
 	if cfg.TokenStore != cache.BackendKeychain {
 		t.Errorf("TokenStore = %q, want flag to win over env", cfg.TokenStore)
+	}
+}
+
+func TestParse_TokenStoreNone(t *testing.T) {
+	var stderr bytes.Buffer
+	cfg, err := Parse([]string{
+		"--issuer=https://issuer.example", "--client-id=cid", "--token-store=none",
+	}, &stderr, Env{Getenv: noEnv})
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.TokenStore != cache.BackendNone {
+		t.Errorf("TokenStore = %q, want none", cfg.TokenStore)
+	}
+}
+
+func TestParse_TokenStoreNone_SkipsDefaultDirResolution(t *testing.T) {
+	// A broken $HOME/$XDG_CACHE_HOME must not fail Parse when caching is
+	// explicitly disabled, since cache.DefaultDir is never consulted.
+	env := envFrom(map[string]string{"HOME": "", "XDG_CACHE_HOME": ""})
+	var stderr bytes.Buffer
+	cfg, err := Parse([]string{
+		"--issuer=https://issuer.example", "--client-id=cid", "--token-store=none",
+	}, &stderr, Env{Getenv: env})
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.TokenStoreDir != "" {
+		t.Errorf("TokenStoreDir = %q, want empty when --token-store=none", cfg.TokenStoreDir)
 	}
 }
 

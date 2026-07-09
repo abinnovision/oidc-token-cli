@@ -47,16 +47,18 @@ type newTokenExchangeFunc func(cfg *config.Config) tokenExchanger
 func buildStore(ctx context.Context, cfg *config.Config, stderr io.Writer) (cache.Store, error) {
 	switch cfg.TokenStore {
 	case cache.BackendFile:
-		return cache.New(cfg.CacheDir), nil
+		return cache.New(cfg.TokenStoreDir), nil
 	case cache.BackendKeychain:
 		ks := cache.NewKeychainStore()
 		if err := ks.Probe(ctx); err != nil {
 			return nil, fmt.Errorf("--token-store=keychain requires a working OS keychain: %w", err)
 		}
 		return ks, nil
+	case cache.BackendNone:
+		return &cache.NoopStore{}, nil
 	default: // cache.BackendAuto
 		return &cache.ChainStore{
-			Backends: []cache.Store{cache.NewKeychainStore(), cache.New(cfg.CacheDir)},
+			Backends: []cache.Store{cache.NewKeychainStore(), cache.New(cfg.TokenStoreDir)},
 			Logger: func(format string, args ...any) {
 				fmt.Fprintf(stderr, format+"\n", args...)
 			},
