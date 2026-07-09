@@ -53,7 +53,7 @@ type TokenSource interface {
 // login, in that order, stopping at the first step that yields a usable
 // token.
 type Runner struct {
-	Cache  *cache.Cache
+	Cache  cache.Store
 	Source TokenSource
 	Config *config.Config
 	// Now is injected for deterministic expiry tests; defaults to time.Now.
@@ -75,7 +75,7 @@ func (r *Runner) now() time.Time {
 func (r *Runner) Run(ctx context.Context) (output.Result, error) {
 	issuer, clientID := r.Config.Issuer, r.Config.ClientID
 
-	entry, ok, err := r.Cache.Load(issuer, clientID)
+	entry, ok, err := r.Cache.Load(ctx, issuer, clientID)
 	if err != nil {
 		return output.Result{}, fmt.Errorf("%w: %v", ErrCacheRead, err)
 	}
@@ -116,7 +116,7 @@ func (r *Runner) tryRefresh(ctx context.Context, issuer, clientID string, staleE
 		outErr error
 	)
 	lockErr := r.Cache.WithLock(ctx, issuer, clientID, func() error {
-		fresh, ok, err := r.Cache.Load(issuer, clientID)
+		fresh, ok, err := r.Cache.Load(ctx, issuer, clientID)
 		if err == nil && ok && r.entryValid(fresh) {
 			result = entryResult(fresh)
 			return nil
@@ -146,7 +146,7 @@ func (r *Runner) tryRefresh(ctx context.Context, issuer, clientID string, staleE
 			// IdP may omit refresh_token without actually rotating/revoking it.
 			res.RefreshToken = refreshToken
 		}
-		if err := r.persist(issuer, clientID, res); err != nil {
+		if err := r.persist(ctx, issuer, clientID, res); err != nil {
 			outErr = fmt.Errorf("%w: %v", ErrCacheWrite, err)
 			return nil
 		}
@@ -173,7 +173,7 @@ func (r *Runner) login(ctx context.Context, issuer, clientID string) (output.Res
 	if res.RefreshToken == "" && r.Stderr != nil {
 		fmt.Fprintln(r.Stderr, "warning: issuer did not return a refresh_token; silent refresh will not be possible for this profile")
 	}
-	if err := r.persist(issuer, clientID, res); err != nil {
+	if err := r.persist(ctx, issuer, clientID, res); err != nil {
 		return output.Result{}, fmt.Errorf("%w: %v", ErrCacheWrite, err)
 	}
 	return res, nil
@@ -194,8 +194,13 @@ func (r *Runner) checkIDToken(res output.Result) error {
 	return nil
 }
 
-func (r *Runner) persist(issuer, clientID string, res output.Result) error {
-	return r.Cache.Save(cache.Entry{
+// Logout removes any cached entry for r.Config.Issuer/ClientID.
+func (r *Runner) Logout(ctx context.Context) error {
+	return r.Cache.Delete(ctx, r.Config.Issuer, r.Config.ClientID)
+}
+
+func (r *Runner) persist(ctx context.Context, issuer, clientID string, res output.Result) error {
+	return r.Cache.Save(ctx, cache.Entry{
 		Issuer:       issuer,
 		ClientID:     clientID,
 		AccessToken:  res.AccessToken,

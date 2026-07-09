@@ -49,7 +49,7 @@ func TestE2E_RefreshToken_EndToEnd(t *testing.T) {
 
 	// Force the cached entry to look expired so Run() takes the silent
 	// refresh path instead of the still-valid cache hit.
-	if err := c.Save(cache.Entry{
+	if err := c.Save(context.Background(), cache.Entry{
 		Issuer:       cfg.Issuer,
 		ClientID:     cfg.ClientID,
 		AccessToken:  seedRes.AccessToken,

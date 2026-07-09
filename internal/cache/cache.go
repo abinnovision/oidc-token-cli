@@ -24,20 +24,12 @@ const lockRetryDelay = 50 * time.Millisecond
 // lock within lockAcquireTimeout, or the caller's ctx was done first.
 var ErrLockTimeout = errors.New("cache: timed out waiting for the profile lock")
 
-// Entry is the on-disk cache record for a single (issuer, client_id) profile.
-type Entry struct {
-	Issuer       string    `json:"issuer"`
-	ClientID     string    `json:"client_id"`
-	AccessToken  string    `json:"access_token,omitempty"`
-	IDToken      string    `json:"id_token,omitempty"`
-	RefreshToken string    `json:"refresh_token,omitempty"`
-	Expiry       time.Time `json:"expiry"`
-}
-
-// Cache is a directory of per-profile JSON token files.
+// Cache is a directory of per-profile JSON token files. It implements Store.
 type Cache struct {
 	Dir string
 }
+
+var _ Store = (*Cache)(nil)
 
 // New returns a Cache rooted at dir. The directory is created lazily on
 // first write, with 0700 permissions.
@@ -95,7 +87,7 @@ func (c *Cache) ensureDir() error {
 // Load reads the cache entry for (issuer, clientID). An absent or
 // unparseable file is reported as ok==false, err==nil (re-authenticate);
 // other I/O errors (e.g. permission denied) return a non-nil error.
-func (c *Cache) Load(issuer, clientID string) (Entry, bool, error) {
+func (c *Cache) Load(_ context.Context, issuer, clientID string) (Entry, bool, error) {
 	b, err := os.ReadFile(c.path(issuer, clientID))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -114,7 +106,7 @@ func (c *Cache) Load(issuer, clientID string) (Entry, bool, error) {
 // Save atomically writes entry to its cache file: dir 0700, file 0600,
 // write-to-temp-then-rename in the same directory so a crash never leaves a
 // partially written cache file.
-func (c *Cache) Save(e Entry) error {
+func (c *Cache) Save(_ context.Context, e Entry) error {
 	if err := c.ensureDir(); err != nil {
 		return err
 	}
@@ -174,4 +166,16 @@ func (c *Cache) WithLock(ctx context.Context, issuer, clientID string, fn func()
 	}
 	defer fl.Unlock()
 	return fn()
+}
+
+// Delete removes the cache file for (issuer, clientID). Absent files are not
+// an error.
+func (c *Cache) Delete(_ context.Context, issuer, clientID string) error {
+	if err := os.Remove(c.path(issuer, clientID)); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("cache: delete: %w", err)
+	}
+	return nil
 }
