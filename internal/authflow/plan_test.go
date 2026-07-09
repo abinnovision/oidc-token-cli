@@ -31,6 +31,14 @@ type fakeProvider struct {
 	// its most recent call, and what was written to it.
 	lastHintNonNil bool
 	lastHintWrite  string
+
+	tokenExchangeErr error
+	// lastTokenExchange* record TokenExchange's most recent arguments, for
+	// tests asserting Source.TokenExchange delegates them unchanged.
+	lastTokenExchangeSubjectToken     string
+	lastTokenExchangeSubjectTokenType string
+	lastTokenExchangeRequestedType    string
+	lastTokenExchangeResources        []string
 }
 
 func (f *fakeProvider) SupportsGrant(grant string) bool {
@@ -73,6 +81,17 @@ func (f *fakeProvider) AuthCodeLogin(ctx context.Context, scope string, port int
 }
 
 func (f *fakeProvider) Refresh(ctx context.Context, scope, refreshToken string) (output.Result, error) {
+	return f.loginResult, nil
+}
+
+func (f *fakeProvider) TokenExchange(ctx context.Context, scope, subjectToken, subjectTokenType, requestedTokenType string, resources []string) (output.Result, error) {
+	f.lastTokenExchangeSubjectToken = subjectToken
+	f.lastTokenExchangeSubjectTokenType = subjectTokenType
+	f.lastTokenExchangeRequestedType = requestedTokenType
+	f.lastTokenExchangeResources = resources
+	if f.tokenExchangeErr != nil {
+		return output.Result{}, f.tokenExchangeErr
+	}
 	return f.loginResult, nil
 }
 

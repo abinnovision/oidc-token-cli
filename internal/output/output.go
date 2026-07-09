@@ -26,6 +26,9 @@ type Result struct {
 	// itself — the runner decides based on --token-type. Never persisted
 	// to the cache.
 	IDTokenError error
+	// IssuedTokenType is RFC 8693 §2.2.1's issued_token_type, populated only
+	// by a token-exchange response; empty for every other grant.
+	IssuedTokenType string
 }
 
 // Select returns the token string for the requested type and whether it was
@@ -55,10 +58,11 @@ func WriteBare(w io.Writer, r Result, tt TokenType) error {
 
 // allDoc is the --all JSON document shape.
 type allDoc struct {
-	AccessToken  string `json:"access_token,omitempty"`
-	IDToken      string `json:"id_token,omitempty"`
-	RefreshToken string `json:"refresh_token,omitempty"`
-	Expiry       string `json:"expiry,omitempty"`
+	AccessToken     string `json:"access_token,omitempty"`
+	IDToken         string `json:"id_token,omitempty"`
+	RefreshToken    string `json:"refresh_token,omitempty"`
+	Expiry          string `json:"expiry,omitempty"`
+	IssuedTokenType string `json:"issued_token_type,omitempty"`
 }
 
 // WriteAll writes a JSON document with every available credential field to
@@ -66,9 +70,10 @@ type allDoc struct {
 // first, then written in one call).
 func WriteAll(w io.Writer, r Result) error {
 	doc := allDoc{
-		AccessToken:  r.AccessToken,
-		IDToken:      r.IDToken,
-		RefreshToken: r.RefreshToken,
+		AccessToken:     r.AccessToken,
+		IDToken:         r.IDToken,
+		RefreshToken:    r.RefreshToken,
+		IssuedTokenType: r.IssuedTokenType,
 	}
 	if !r.Expiry.IsZero() {
 		doc.Expiry = r.Expiry.UTC().Format(time.RFC3339)

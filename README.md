@@ -20,8 +20,7 @@ cache is cold.
 - Public client by default (PKCE, no secret). Confidential clients are
   opt-in via `--client-auth-method` — see
   [Confidential clients](#confidential-clients). mTLS client
-  authentication (`tls_client_auth`) and RFC 8693 token exchange are not
-  supported.
+  authentication (`tls_client_auth`) is not supported.
 
 ## Install
 
@@ -36,7 +35,7 @@ oidc-token \
   --client-id my-public-client \
   [--scope "openid offline_access"] \
   [--audience my-api] \
-  [--grant-type auto|authcode|device-code] \
+  [--grant-type auto|authcode|device-code|token-exchange] \
   [--token-type access_token|id_token] \
   [--cache-dir DIR] \
   [--token-store auto|keychain|file] \
@@ -48,7 +47,9 @@ oidc-token \
   [--client-auth-method client_secret_basic|client_secret_post|private_key_jwt] \
   [--client-secret SECRET | --client-secret-file FILE] \
   [--private-key-file FILE] [--private-key-id KID] [--private-key-alg ALG] \
-  [--client-assertion-audience AUD]
+  [--client-assertion-audience AUD] \
+  [--subject-token TOKEN | --subject-token-file FILE] [--subject-token-type TYPE] \
+  [--requested-token-type TYPE] [--resource URI ...]
 ```
 
 | Flag | Default | Description |
@@ -57,7 +58,7 @@ oidc-token \
 | `--client-id` | *(required)* | OAuth2/OIDC client ID. |
 | `--scope` | `openid offline_access` | Space-separated scopes. |
 | `--audience` | *(empty)* | Expected `aud` claim — required if the relying party checks audience (e.g. frp's `auth.oidc.audience`). |
-| `--grant-type` | `auto` | `auto`, `authcode`, or `device-code`. See [Grant selection](#grant-selection). |
+| `--grant-type` | `auto` | `auto`, `authcode`, `device-code`, or `token-exchange`. See [Grant selection](#grant-selection) and [Token exchange](#token-exchange-rfc-8693). |
 | `--token-type` | `access_token` | Which field bare mode prints. |
 | `--cache-dir` | `$XDG_CACHE_HOME/oidc-token` | Override the token cache directory (used by the `file` backend and, in `auto` mode, as the fallback store). |
 | `--token-store` | `auto` | `auto`, `keychain`, or `file`. See [Cache](#cache). |
@@ -72,19 +73,24 @@ oidc-token \
 | `--private-key-id` | *(none)* | Optional `kid` header on the client assertion. |
 | `--private-key-alg` | `RS256` | JWS signing algorithm: `RS256`/`RS384`/`RS512`/`PS256`/`PS384`/`PS512`/`ES256`/`ES384`/`ES512`. |
 | `--client-assertion-audience` | *(the discovered token endpoint)* | Override the assertion's `aud` claim, for issuers that expect the issuer URL or something else instead. |
+| `--subject-token` / `--subject-token-file` | *(none)* | RFC 8693 `subject_token` for `--grant-type=token-exchange`. Prefer `--subject-token-file` or `$OIDC_TOKEN_SUBJECT_TOKEN` over the bare flag; `--subject-token-file` wins if both are set. |
+| `--subject-token-type` | `urn:ietf:params:oauth:token-type:access_token` | RFC 8693 `subject_token_type`. |
+| `--requested-token-type` | *(none)* | RFC 8693 `requested_token_type`; omitted from the request entirely when unset. |
+| `--resource` | *(none)* | RFC 8693 `resource` target URI; repeatable for multiple resource params. |
 
-Every flag except `--config`/`--client-secret-file` also has an env var:
-`OIDC_TOKEN_ISSUER`, `OIDC_TOKEN_CLIENT_ID`, `OIDC_TOKEN_SCOPE`,
-`OIDC_TOKEN_AUDIENCE`, `OIDC_TOKEN_GRANT_TYPE`, `OIDC_TOKEN_TOKEN_TYPE`,
-`OIDC_TOKEN_CACHE_DIR`, `OIDC_TOKEN_STORE`, `OIDC_TOKEN_NON_INTERACTIVE`,
-`OIDC_TOKEN_LOGOUT`, `OIDC_TOKEN_CLIENT_AUTH_METHOD`,
-`OIDC_TOKEN_CLIENT_SECRET`, `OIDC_TOKEN_PRIVATE_KEY_FILE`,
-`OIDC_TOKEN_PRIVATE_KEY_ID`, `OIDC_TOKEN_PRIVATE_KEY_ALG`,
-`OIDC_TOKEN_CLIENT_ASSERTION_AUDIENCE`. `OIDC_TOKEN_CLIENT_SECRET` (or
-`--client-secret-file`) is the recommended way to pass a secret — avoid
-`--client-secret` on the command line where it can land in shell history
-or process listings. Precedence: defaults < env < `--config` file <
-explicit flags.
+Every flag except `--config`/`--client-secret-file`/`--subject-token-file`/
+`--resource` also has an env var: `OIDC_TOKEN_ISSUER`,
+`OIDC_TOKEN_CLIENT_ID`, `OIDC_TOKEN_SCOPE`, `OIDC_TOKEN_AUDIENCE`,
+`OIDC_TOKEN_GRANT_TYPE`, `OIDC_TOKEN_TOKEN_TYPE`, `OIDC_TOKEN_CACHE_DIR`,
+`OIDC_TOKEN_STORE`, `OIDC_TOKEN_NON_INTERACTIVE`, `OIDC_TOKEN_LOGOUT`,
+`OIDC_TOKEN_CLIENT_AUTH_METHOD`, `OIDC_TOKEN_CLIENT_SECRET`,
+`OIDC_TOKEN_PRIVATE_KEY_FILE`, `OIDC_TOKEN_PRIVATE_KEY_ID`,
+`OIDC_TOKEN_PRIVATE_KEY_ALG`, `OIDC_TOKEN_CLIENT_ASSERTION_AUDIENCE`,
+`OIDC_TOKEN_SUBJECT_TOKEN`, `OIDC_TOKEN_SUBJECT_TOKEN_TYPE`.
+`OIDC_TOKEN_CLIENT_SECRET` (or `--client-secret-file`) is the recommended
+way to pass a secret — avoid `--client-secret` on the command line where it
+can land in shell history or process listings. Precedence: defaults < env <
+`--config` file < explicit flags.
 
 ### Grant selection
 
@@ -124,8 +130,33 @@ refresh):
   (conventions vary between IdPs — check yours if authentication fails
   with an audience-related error).
 
-Not supported: mTLS client authentication (`tls_client_auth`) and RFC 8693
-token exchange.
+Not supported: mTLS client authentication (`tls_client_auth`).
+
+### Token exchange (RFC 8693)
+
+`--grant-type=token-exchange` exchanges an existing `--subject-token` (e.g.
+minted by another system or CI job) for a new token, instead of performing
+an interactive login. It requires `--subject-token` (or, preferably,
+`--subject-token-file`/`$OIDC_TOKEN_SUBJECT_TOKEN`) and reuses
+`--audience`/`--scope` and, for confidential clients, the same
+`--client-auth-method` machinery as the other grants.
+
+Unlike every other grant, **token exchange is never cached**: each
+invocation hits the token endpoint fresh. The cache's `(issuer, client_id)`
+key can't distinguish between exchanges for different `--audience`/
+`--resource` targets, and reusing it would risk serving a token minted for
+the wrong one.
+
+- `--subject-token-type` defaults to
+  `urn:ietf:params:oauth:token-type:access_token`; override it per RFC 8693
+  §3 (e.g. `...:id_token`, `...:jwt`) to match what `--subject-token`
+  actually is.
+- `--requested-token-type` is optional and omitted from the request
+  entirely when unset.
+- `--resource` may be repeated to send multiple RFC 8693 `resource` params
+  in a single request.
+- With `--all`, the response's `issued_token_type` (RFC 8693 §2.2.1) is
+  included in the JSON document.
 
 ### Cache
 

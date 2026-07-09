@@ -33,3 +33,22 @@ func newRealSource(cfg *config.Config) runner.TokenSource {
 		ClientAssertionAudience: cfg.ClientAssertionAudience,
 	}
 }
+
+// newRealTokenExchangeSource wires the real network-facing tokenExchanger:
+// runtime OIDC discovery plus an RFC 8693 token-exchange request, with no
+// caching or interactive-login machinery involved.
+func newRealTokenExchangeSource(cfg *config.Config) tokenExchanger {
+	return &authflow.Source{
+		Issuer:   cfg.Issuer,
+		ClientID: cfg.ClientID,
+		Scope:    cfg.Scope,
+		Audience: cfg.Audience,
+
+		ClientAuthMethod:        oidc.ClientAuthMethod(cfg.ClientAuthMethod),
+		ClientSecret:            cfg.ClientSecret,
+		PrivateKey:              cfg.PrivateKey,
+		PrivateKeyID:            cfg.PrivateKeyID,
+		PrivateKeySigningAlg:    cfg.SigningAlg(),
+		ClientAssertionAudience: cfg.ClientAssertionAudience,
+	}
+}

@@ -22,9 +22,10 @@ import (
 type GrantType string
 
 const (
-	GrantAuto       GrantType = "auto"
-	GrantAuthCode   GrantType = "authcode"
-	GrantDeviceCode GrantType = "device-code"
+	GrantAuto          GrantType = "auto"
+	GrantAuthCode      GrantType = "authcode"
+	GrantDeviceCode    GrantType = "device-code"
+	GrantTokenExchange GrantType = "token-exchange"
 )
 
 // Grant identifies a single OAuth2 grant by its wire name, as used with
@@ -34,6 +35,7 @@ type Grant string
 const (
 	grantAuthorizationCode Grant = "authorization_code"
 	grantDeviceCodeURN     Grant = "urn:ietf:params:oauth:grant-type:device_code"
+	grantTokenExchangeURN  Grant = "urn:ietf:params:oauth:grant-type:token-exchange"
 )
 
 // maxInteractiveAttempts bounds total interactive attempts across a single
@@ -64,6 +66,7 @@ type grantSource interface {
 	DeviceLogin(ctx context.Context, scope string, prompt io.Writer) (output.Result, error)
 	AuthCodeLogin(ctx context.Context, scope string, port int, openBrowser func(string) error, prompt, hint io.Writer) (output.Result, error)
 	Refresh(ctx context.Context, scope, refreshToken string) (output.Result, error)
+	TokenExchange(ctx context.Context, scope, subjectToken, subjectTokenType, requestedTokenType string, resources []string) (output.Result, error)
 	SetClientAuth(method oidc.ClientAuthMethod, secret string, signer crypto.Signer, keyID string, alg jose.SignatureAlgorithm, audience string)
 }
 
@@ -219,6 +222,14 @@ type Source struct {
 	PrivateKeySigningAlg    jose.SignatureAlgorithm
 	ClientAssertionAudience string
 
+	// Token-exchange (RFC 8693) parameters; only meaningful when
+	// GrantType == GrantTokenExchange. TokenExchange is never routed
+	// through plan()/Login's interactive-viability model or cached.
+	SubjectToken       string
+	SubjectTokenType   string
+	RequestedTokenType string
+	Resources          []string
+
 	mu       sync.Mutex
 	provider grantSource
 	// discoverFunc is overridden in tests to inject a fake grantSource
@@ -261,6 +272,20 @@ func (s *Source) Refresh(ctx context.Context, refreshToken string) (output.Resul
 		return output.Result{}, err
 	}
 	return p.Refresh(ctx, s.Scope, refreshToken)
+}
+
+// TokenExchange performs an RFC 8693 token exchange using s.SubjectToken et
+// al. Unlike Login, it never participates in plan()'s interactive-viability
+// selection or the per-client-rejection fallback: there is exactly one
+// grant to attempt, so a rejection is a hard failure. Unlike Refresh, its
+// result is never cached by the runner (a separate, non-runner code path
+// calls this directly — see cmd/oidc-token/main.go).
+func (s *Source) TokenExchange(ctx context.Context, subjectToken, subjectTokenType, requestedTokenType string, resources []string) (output.Result, error) {
+	p, err := s.discover(ctx)
+	if err != nil {
+		return output.Result{}, err
+	}
+	return p.TokenExchange(ctx, s.Scope, subjectToken, subjectTokenType, requestedTokenType, resources)
 }
 
 // Login implements runner.TokenSource: selects a grant order via plan(),

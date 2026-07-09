@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"sync"
 	"testing"
@@ -63,6 +64,12 @@ type MockIssuer struct {
 	OmitRefreshToken              bool
 	AuthCodeErr                   string // non-empty: authorization_code grant always fails with this error
 	OmitDeviceExpiresIn           bool   // non-compliant with RFC 8628 §3.2, but some issuers do this
+	// TokenExchangeErr, if non-empty, makes the RFC 8693 token-exchange
+	// grant always fail with this error code.
+	TokenExchangeErr string
+	// IssuedTokenType is echoed back as the token-exchange response's
+	// issued_token_type; defaults to the access_token URN when empty.
+	IssuedTokenType string
 	// NonceForAuthCode is embedded as the id_token's nonce claim on the
 	// authorization_code grant response; this mock has no server-side
 	// session state binding it to the authorization request automatically,
@@ -81,6 +88,18 @@ type MockIssuer struct {
 	ExpectedAssertionKey crypto.PublicKey
 
 	assertionJTIs []string
+	// lastTokenExchangeForm captures the most recent token-exchange
+	// request's form values, for tests asserting on subject_token/
+	// resource/requested_token_type.
+	lastTokenExchangeForm url.Values
+}
+
+// LastTokenExchangeRequest returns the form values of the most recent
+// token-exchange request handleTokenExchange has seen, or nil if none yet.
+func (m *MockIssuer) LastTokenExchangeRequest() url.Values {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.lastTokenExchangeForm
 }
 
 // AssertionJTIs returns the jti claim of every private_key_jwt client
@@ -204,6 +223,8 @@ func (m *MockIssuer) handleToken(w http.ResponseWriter, r *http.Request) {
 		m.handleRefreshToken(w, r)
 	case "authorization_code":
 		m.handleAuthCodeToken(w, r)
+	case "urn:ietf:params:oauth:grant-type:token-exchange":
+		m.handleTokenExchange(w, r)
 	default:
 		writeTokenError(w, http.StatusBadRequest, "unsupported_grant_type")
 	}
@@ -275,7 +296,7 @@ func (m *MockIssuer) handleAuthCodeToken(w http.ResponseWriter, r *http.Request)
 		writeTokenError(w, http.StatusBadRequest, "invalid_grant")
 		return
 	}
-	m.writeTokenSuccess(w, "authcode-subject", m.NonceForAuthCode)
+	m.writeTokenSuccess(w, "authcode-subject", m.NonceForAuthCode, nil)
 }
 
 func (m *MockIssuer) handleDeviceToken(w http.ResponseWriter, r *http.Request) {
@@ -300,7 +321,7 @@ func (m *MockIssuer) handleDeviceToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	m.writeTokenSuccess(w, "device-subject", "")
+	m.writeTokenSuccess(w, "device-subject", "", nil)
 }
 
 func (m *MockIssuer) handleRefreshToken(w http.ResponseWriter, r *http.Request) {
@@ -314,10 +335,35 @@ func (m *MockIssuer) handleRefreshToken(w http.ResponseWriter, r *http.Request) 
 	m.mu.Lock()
 	m.refreshCalls++
 	m.mu.Unlock()
-	m.writeTokenSuccess(w, "refresh-subject", "")
+	m.writeTokenSuccess(w, "refresh-subject", "", nil)
 }
 
-func (m *MockIssuer) writeTokenSuccess(w http.ResponseWriter, subject, nonce string) {
+// handleTokenExchange implements the RFC 8693 token-exchange grant:
+// subject_token/subject_token_type are required, everything else (audience,
+// scope, resource, requested_token_type) is optional and merely recorded
+// for test assertions via LastTokenExchangeRequest.
+func (m *MockIssuer) handleTokenExchange(w http.ResponseWriter, r *http.Request) {
+	m.mu.Lock()
+	m.lastTokenExchangeForm = r.Form
+	m.mu.Unlock()
+
+	if m.TokenExchangeErr != "" {
+		writeTokenError(w, http.StatusBadRequest, m.TokenExchangeErr)
+		return
+	}
+	if r.Form.Get("subject_token") == "" || r.Form.Get("subject_token_type") == "" {
+		writeTokenError(w, http.StatusBadRequest, "invalid_request")
+		return
+	}
+
+	issuedTokenType := m.IssuedTokenType
+	if issuedTokenType == "" {
+		issuedTokenType = "urn:ietf:params:oauth:token-type:access_token"
+	}
+	m.writeTokenSuccess(w, "token-exchange-subject", "", map[string]any{"issued_token_type": issuedTokenType})
+}
+
+func (m *MockIssuer) writeTokenSuccess(w http.ResponseWriter, subject, nonce string, extra map[string]any) {
 	m.mu.Lock()
 	m.refreshSeq++
 	seq := m.refreshSeq
@@ -338,6 +384,9 @@ func (m *MockIssuer) writeTokenSuccess(w http.ResponseWriter, subject, nonce str
 			return
 		}
 		resp["id_token"] = idToken
+	}
+	for k, v := range extra {
+		resp[k] = v
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)

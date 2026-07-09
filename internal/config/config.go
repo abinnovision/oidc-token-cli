@@ -20,9 +20,10 @@ import (
 type GrantType string
 
 const (
-	GrantAuto       GrantType = "auto"
-	GrantAuthCode   GrantType = "authcode"
-	GrantDeviceCode GrantType = "device-code"
+	GrantAuto          GrantType = "auto"
+	GrantAuthCode      GrantType = "authcode"
+	GrantDeviceCode    GrantType = "device-code"
+	GrantTokenExchange GrantType = "token-exchange"
 )
 
 // TokenType selects which credential field is printed.
@@ -68,6 +69,10 @@ var validSigningAlgs = map[string]jose.SignatureAlgorithm{
 // it from scopes_supported; the runner warns if no refresh_token comes back.
 const DefaultScope = "openid offline_access"
 
+// DefaultSubjectTokenType is used for RFC 8693 §3's subject_token_type when
+// --subject-token-type isn't set.
+const DefaultSubjectTokenType = "urn:ietf:params:oauth:token-type:access_token"
+
 // Config is the fully resolved set of identity/client + behavior knobs.
 type Config struct {
 	Issuer         string
@@ -105,6 +110,18 @@ type Config struct {
 	// PrivateKey is the parsed form of PrivateKeyPath, resolved once at
 	// startup so a bad key file fails fast instead of mid-flow.
 	PrivateKey crypto.Signer
+
+	// SubjectToken is RFC 8693 §2.1's subject_token, required when
+	// GrantType == GrantTokenExchange.
+	SubjectToken string
+	// SubjectTokenType is RFC 8693 §3's subject_token_type; defaults to
+	// DefaultSubjectTokenType.
+	SubjectTokenType string
+	// RequestedTokenType is RFC 8693 §2.1's optional requested_token_type;
+	// omitted from the request entirely when empty.
+	RequestedTokenType string
+	// Resources are RFC 8693 §2.1's optional, repeatable resource params.
+	Resources []string
 }
 
 // fileConfig mirrors Config's JSON-file representation. Every field is a
@@ -129,6 +146,11 @@ type fileConfig struct {
 	PrivateKeyID            *string `json:"private_key_id"`
 	PrivateKeySigningAlg    *string `json:"private_key_alg"`
 	ClientAssertionAudience *string `json:"client_assertion_audience"`
+
+	SubjectToken       *string  `json:"subject_token"`
+	SubjectTokenType   *string  `json:"subject_token_type"`
+	RequestedTokenType *string  `json:"requested_token_type"`
+	Resources          []string `json:"resource"`
 }
 
 // Env is the subset of the process environment config.Parse reads from,
@@ -147,6 +169,7 @@ func (e Env) get(key string) string {
 var envKeys = struct {
 	issuer, clientID, scope, audience, grantType, tokenType, cacheDir, tokenStore, nonInteractive, logout       string
 	clientAuthMethod, clientSecret, privateKeyPath, privateKeyID, privateKeySigningAlg, clientAssertionAudience string
+	subjectToken, subjectTokenType                                                                              string
 }{
 	issuer:         "OIDC_TOKEN_ISSUER",
 	clientID:       "OIDC_TOKEN_CLIENT_ID",
@@ -165,6 +188,9 @@ var envKeys = struct {
 	privateKeyID:            "OIDC_TOKEN_PRIVATE_KEY_ID",
 	privateKeySigningAlg:    "OIDC_TOKEN_PRIVATE_KEY_ALG",
 	clientAssertionAudience: "OIDC_TOKEN_CLIENT_ASSERTION_AUDIENCE",
+
+	subjectToken:     "OIDC_TOKEN_SUBJECT_TOKEN",
+	subjectTokenType: "OIDC_TOKEN_SUBJECT_TOKEN_TYPE",
 }
 
 // Parse builds a Config from, in ascending priority: defaults, environment
@@ -203,7 +229,14 @@ func Parse(args []string, stderr io.Writer, env Env) (*Config, error) {
 		privateKeyID            = fs.String("private-key-id", "", "optional \"kid\" header on the private_key_jwt client assertion")
 		privateKeyAlg           = fs.String("private-key-alg", DefaultPrivateKeySigningAlg, "JWS signing algorithm for private_key_jwt: RS256|RS384|RS512|PS256|PS384|PS512|ES256|ES384|ES512")
 		clientAssertionAudience = fs.String("client-assertion-audience", "", "override the \"aud\" claim of the private_key_jwt assertion (default: the discovered token endpoint)")
+
+		subjectToken       = fs.String("subject-token", "", "subject_token for RFC 8693 token exchange (--grant-type=token-exchange); prefer --subject-token-file or $"+envKeys.subjectToken+" over this flag")
+		subjectTokenFile   = fs.String("subject-token-file", "", "path to a file containing the subject_token (trailing newline trimmed); takes precedence over --subject-token")
+		subjectTokenType   = fs.String("subject-token-type", DefaultSubjectTokenType, "subject_token_type per RFC 8693 §3 (--grant-type=token-exchange)")
+		requestedTokenType = fs.String("requested-token-type", "", "optional requested_token_type per RFC 8693 §2.1 (--grant-type=token-exchange); omitted from the request entirely when unset")
+		resources          stringSliceFlag
 	)
+	fs.Var(&resources, "resource", "target resource URI for RFC 8693 token exchange (--grant-type=token-exchange); repeatable for multiple resource params")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err
@@ -215,6 +248,7 @@ func Parse(args []string, stderr io.Writer, env Env) (*Config, error) {
 		TokenType:            TokenTypeAccessToken,
 		TokenStore:           cache.BackendAuto,
 		PrivateKeySigningAlg: DefaultPrivateKeySigningAlg,
+		SubjectTokenType:     DefaultSubjectTokenType,
 	}
 
 	// 1. Environment.
@@ -265,6 +299,12 @@ func Parse(args []string, stderr io.Writer, env Env) (*Config, error) {
 	}
 	if v := env.get(envKeys.clientAssertionAudience); v != "" {
 		cfg.ClientAssertionAudience = v
+	}
+	if v := env.get(envKeys.subjectToken); v != "" {
+		cfg.SubjectToken = v
+	}
+	if v := env.get(envKeys.subjectTokenType); v != "" {
+		cfg.SubjectTokenType = v
 	}
 
 	// 2. Config file.
@@ -334,6 +374,18 @@ func Parse(args []string, stderr io.Writer, env Env) (*Config, error) {
 	if explicit["client-assertion-audience"] {
 		cfg.ClientAssertionAudience = *clientAssertionAudience
 	}
+	if explicit["subject-token"] {
+		cfg.SubjectToken = *subjectToken
+	}
+	if explicit["subject-token-type"] {
+		cfg.SubjectTokenType = *subjectTokenType
+	}
+	if explicit["requested-token-type"] {
+		cfg.RequestedTokenType = *requestedTokenType
+	}
+	if explicit["resource"] {
+		cfg.Resources = []string(resources)
+	}
 
 	// --client-secret-file always takes precedence over --client-secret /
 	// OIDC_TOKEN_CLIENT_SECRET / the config file's client_secret, since it's
@@ -344,6 +396,17 @@ func Parse(args []string, stderr io.Writer, env Env) (*Config, error) {
 			return nil, fmt.Errorf("config: read --client-secret-file: %w", err)
 		}
 		cfg.ClientSecret = strings.TrimRight(string(secret), "\n")
+	}
+
+	// --subject-token-file always takes precedence over --subject-token /
+	// OIDC_TOKEN_SUBJECT_TOKEN / the config file's subject_token, mirroring
+	// --client-secret-file's precedence above.
+	if explicit["subject-token-file"] {
+		tok, err := os.ReadFile(*subjectTokenFile)
+		if err != nil {
+			return nil, fmt.Errorf("config: read --subject-token-file: %w", err)
+		}
+		cfg.SubjectToken = strings.TrimRight(string(tok), "\n")
 	}
 
 	if cfg.CacheDir == "" {
@@ -371,9 +434,9 @@ func (c *Config) validate() error {
 		return fmt.Errorf("config: --client-id is required")
 	}
 	switch c.GrantType {
-	case GrantAuto, GrantAuthCode, GrantDeviceCode:
+	case GrantAuto, GrantAuthCode, GrantDeviceCode, GrantTokenExchange:
 	default:
-		return fmt.Errorf("config: invalid --grant-type %q (want auto|authcode|device-code)", c.GrantType)
+		return fmt.Errorf("config: invalid --grant-type %q (want auto|authcode|device-code|token-exchange)", c.GrantType)
 	}
 	switch c.TokenType {
 	case TokenTypeAccessToken, TokenTypeIDToken:
@@ -407,6 +470,32 @@ func (c *Config) validate() error {
 			return fmt.Errorf("config: --client-secret/--private-key-file require --client-auth-method to be set")
 		}
 	}
+	if c.GrantType == GrantTokenExchange {
+		if c.SubjectToken == "" {
+			return fmt.Errorf("config: --grant-type=token-exchange requires --subject-token, --subject-token-file, or $%s", envKeys.subjectToken)
+		}
+		if c.SubjectTokenType == "" {
+			return fmt.Errorf("config: --subject-token-type must not be empty")
+		}
+	} else if c.SubjectToken != "" || c.RequestedTokenType != "" || len(c.Resources) > 0 {
+		return fmt.Errorf("config: --subject-token/--resource/--requested-token-type require --grant-type=token-exchange")
+	}
+	return nil
+}
+
+// stringSliceFlag implements flag.Value for a repeatable string flag (e.g.
+// --resource), appending on every Set call.
+type stringSliceFlag []string
+
+func (s *stringSliceFlag) String() string {
+	if s == nil {
+		return ""
+	}
+	return strings.Join(*s, ",")
+}
+
+func (s *stringSliceFlag) Set(v string) error {
+	*s = append(*s, v)
 	return nil
 }
 
@@ -517,5 +606,17 @@ func applyFileConfig(cfg *Config, fc *fileConfig) {
 	}
 	if fc.ClientAssertionAudience != nil {
 		cfg.ClientAssertionAudience = *fc.ClientAssertionAudience
+	}
+	if fc.SubjectToken != nil {
+		cfg.SubjectToken = *fc.SubjectToken
+	}
+	if fc.SubjectTokenType != nil {
+		cfg.SubjectTokenType = *fc.SubjectTokenType
+	}
+	if fc.RequestedTokenType != nil {
+		cfg.RequestedTokenType = *fc.RequestedTokenType
+	}
+	if len(fc.Resources) > 0 {
+		cfg.Resources = fc.Resources
 	}
 }

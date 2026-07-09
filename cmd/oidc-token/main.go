@@ -23,12 +23,23 @@ import (
 )
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr, newRealSource))
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr, newRealSource, newRealTokenExchangeSource))
 }
 
 // newSourceFunc builds the network-facing TokenSource for a resolved
 // config; tests inject a fake in its place.
 type newSourceFunc func(cfg *config.Config) runner.TokenSource
+
+// tokenExchanger performs an RFC 8693 token exchange. It is deliberately
+// not part of runner.TokenSource: token exchange is never cached and never
+// goes through the cache/refresh/login pipeline runner.Runner orchestrates.
+type tokenExchanger interface {
+	TokenExchange(ctx context.Context, subjectToken, subjectTokenType, requestedTokenType string, resources []string) (output.Result, error)
+}
+
+// newTokenExchangeFunc builds the network-facing tokenExchanger for a
+// resolved config; tests inject a fake in its place.
+type newTokenExchangeFunc func(cfg *config.Config) tokenExchanger
 
 // buildStore constructs the cache.Store selected by cfg.TokenStore.
 // --token-store=keychain probes the keychain up front and fails fast with a
@@ -56,7 +67,7 @@ func buildStore(ctx context.Context, cfg *config.Config, stderr io.Writer) (cach
 // run is main's testable core. Every write to stdout happens in exactly one
 // place, guarded by err == nil, so a bug elsewhere cannot leak a partial or
 // empty token onto stdout with a zero exit code.
-func run(args []string, stdout, stderr io.Writer, newSource newSourceFunc) int {
+func run(args []string, stdout, stderr io.Writer, newSource newSourceFunc, newTokenExchange newTokenExchangeFunc) int {
 	cfg, err := config.Parse(args, stderr, config.Env{Getenv: os.Getenv})
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -69,6 +80,19 @@ func run(args []string, stdout, stderr io.Writer, newSource newSourceFunc) int {
 	}
 
 	ctx := context.Background()
+
+	// Token exchange is never cached and never goes through
+	// runner.Runner's cache/refresh/login pipeline, so it bypasses
+	// buildStore entirely -- unlike --logout, which still needs a store to
+	// delete an entry from.
+	if cfg.GrantType == config.GrantTokenExchange {
+		result, err := newTokenExchange(cfg).TokenExchange(ctx, cfg.SubjectToken, cfg.SubjectTokenType, cfg.RequestedTokenType, cfg.Resources)
+		if err != nil {
+			fmt.Fprintln(stderr, "error:", err)
+			return 1
+		}
+		return writeResult(stdout, stderr, cfg, result)
+	}
 
 	store, err := buildStore(ctx, cfg, stderr)
 	if err != nil {
@@ -98,9 +122,16 @@ func run(args []string, stdout, stderr io.Writer, newSource newSourceFunc) int {
 		return 1
 	}
 
-	// Build the full output in memory first: a write failure partway
-	// through must never leave a partial token on stdout.
+	return writeResult(stdout, stderr, cfg, result)
+}
+
+// writeResult writes result to stdout as either a bare token or, with
+// --all, a JSON document. The full output is built in memory first: a
+// write failure partway through must never leave a partial token on
+// stdout.
+func writeResult(stdout, stderr io.Writer, cfg *config.Config, result output.Result) int {
 	var buf bytes.Buffer
+	var err error
 	if cfg.All {
 		err = output.WriteAll(&buf, result)
 	} else {
