@@ -24,10 +24,25 @@ jobs:
       - run: go vet ./...
       - run: go test -race ./...
 
+  e2e:
+    # Real-IdP compliance/smoke tier against a dexidp/dex container via
+    # testcontainers-go; kept as its own job (not folded into the test
+    # matrix) so container startup/image-pull time never blocks the fast
+    # unit+mock-integration feedback loop. ubuntu-latest only: GitHub-hosted
+    # macos-latest runners don't reliably have a working Docker daemon.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: go test -tags e2e -race ./e2e/...
+
   release:
     # Tag + release only after the full test matrix is green, and only on
     # pushes to main (never on pull requests).
-    needs: test
+    needs: [test, e2e]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
