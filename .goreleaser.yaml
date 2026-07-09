@@ -31,32 +31,3 @@ release:
   github:
     owner: abinnovision
     name: oidc-token-cli
-
-brews:
-  - name: oidc-token
-    # Same placeholder as above: the homebrew-tap repo doesn't exist yet.
-    # Formula (`brews`), not `homebrew_casks`: Casks apply the
-    # com.apple.quarantine xattr on install, which fails Gatekeeper on
-    # first run for an unsigned/un-notarized binary (this build has
-    # CGO_ENABLED=0 and no signing/notarization config). Formula-installed
-    # binaries are not quarantined, so `brews` is the correct target for a
-    # plain CLI like this one. `brews` still works in goreleaser v2 (only
-    # deprecated as goreleaser's own recommended default, not removed).
-    # `goreleaser check` reports this as a deprecation warning (exit
-    # non-zero) even though the config is otherwise valid and `release`
-    # itself still works — that's expected and accepted here in trade for
-    # avoiding the Gatekeeper problem. Revisit if/when `brews` is actually
-    # removed upstream (would need code-signing/notarization to make
-    # `homebrew_casks` viable, or a self-managed formula outside
-    # goreleaser).
-    repository:
-      owner: abinnovision
-      name: homebrew-tap
-    directory: Formula
-    homepage: "https://github.com/abinnovision/oidc-token-cli"
-    description: "Generic, dynamic OIDC token helper for exec-style credential providers (frpc, kubectl, curl, CI)."
-    license: "Apache-2.0"
-    install: |
-      bin.install "oidc-token"
-    test: |
-      system "#{bin}/oidc-token", "--help"

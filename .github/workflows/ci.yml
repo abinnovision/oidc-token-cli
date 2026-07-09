@@ -70,9 +70,3 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Publishing the `brews` Formula requires push access to a
-          # separate abinnovision/homebrew-tap repo; GITHUB_TOKEN only has
-          # write access to this repo. Set a HOMEBREW_TAP_GITHUB_TOKEN
-          # secret (a PAT scoped to the tap repo) once that repo exists,
-          # or the formula-publish step will fail on release.
-          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
