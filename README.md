@@ -1,4 +1,4 @@
-# oidc-token
+# oidc-token-cli
 
 A small CLI that fetches an OIDC token and prints it as a bare string —
 built as a drop-in `exec` credential provider for `frpc`, `kubectl`,
