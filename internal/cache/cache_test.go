@@ -21,10 +21,10 @@ func TestSaveLoad_RoundTrip(t *testing.T) {
 		RefreshToken: "rt",
 		Expiry:       time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC),
 	}
-	if err := c.Save(want); err != nil {
+	if err := c.Save(context.Background(), want); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
-	got, ok, err := c.Load(want.Issuer, want.ClientID)
+	got, ok, err := c.Load(context.Background(), want.Issuer, want.ClientID)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestSave_FilePermissions(t *testing.T) {
 	sub := filepath.Join(dir, "sub")
 	c := New(sub)
 	e := Entry{Issuer: "iss", ClientID: "cid"}
-	if err := c.Save(e); err != nil {
+	if err := c.Save(context.Background(), e); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
@@ -78,7 +78,7 @@ func TestSave_TightensPreexistingLoosePermissions(t *testing.T) {
 	}
 
 	c := New(dir)
-	if err := c.Save(Entry{Issuer: "iss", ClientID: "cid"}); err != nil {
+	if err := c.Save(context.Background(), Entry{Issuer: "iss", ClientID: "cid"}); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
@@ -94,7 +94,7 @@ func TestSave_TightensPreexistingLoosePermissions(t *testing.T) {
 func TestSave_NoLeftoverTempFiles(t *testing.T) {
 	dir := t.TempDir()
 	c := New(dir)
-	if err := c.Save(Entry{Issuer: "iss", ClientID: "cid"}); err != nil {
+	if err := c.Save(context.Background(), Entry{Issuer: "iss", ClientID: "cid"}); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 	entries, err := os.ReadDir(dir)
@@ -108,9 +108,34 @@ func TestSave_NoLeftoverTempFiles(t *testing.T) {
 	}
 }
 
+func TestDelete_RemovesEntry(t *testing.T) {
+	c := New(t.TempDir())
+	e := Entry{Issuer: "iss", ClientID: "cid", AccessToken: "at"}
+	if err := c.Save(context.Background(), e); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Delete(context.Background(), e.Issuer, e.ClientID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	_, ok, err := c.Load(context.Background(), e.Issuer, e.ClientID)
+	if err != nil {
+		t.Fatalf("Load after Delete: %v", err)
+	}
+	if ok {
+		t.Fatal("Load after Delete must report ok=false")
+	}
+}
+
+func TestDelete_AbsentEntry_NotAnError(t *testing.T) {
+	c := New(t.TempDir())
+	if err := c.Delete(context.Background(), "iss", "cid"); err != nil {
+		t.Fatalf("Delete on absent entry must not error, got: %v", err)
+	}
+}
+
 func TestLoad_AbsentCache_TreatedAsMiss(t *testing.T) {
 	c := New(t.TempDir())
-	_, ok, err := c.Load("https://issuer.example", "client-a")
+	_, ok, err := c.Load(context.Background(), "https://issuer.example", "client-a")
 	if err != nil {
 		t.Fatalf("Load on absent cache returned error: %v", err)
 	}
@@ -129,7 +154,7 @@ func TestLoad_CorruptCache_TreatedAsMiss(t *testing.T) {
 	if err := os.WriteFile(c.path(e.Issuer, e.ClientID), []byte("{not valid json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, ok, err := c.Load(e.Issuer, e.ClientID)
+	_, ok, err := c.Load(context.Background(), e.Issuer, e.ClientID)
 	if err != nil {
 		t.Fatalf("corrupt cache must be a miss, not an error: %v", err)
 	}
@@ -142,20 +167,20 @@ func TestMultiProfile_Independence(t *testing.T) {
 	c := New(t.TempDir())
 	a := Entry{Issuer: "https://a.example", ClientID: "client-a", AccessToken: "token-a"}
 	b := Entry{Issuer: "https://b.example", ClientID: "client-b", AccessToken: "token-b"}
-	if err := c.Save(a); err != nil {
+	if err := c.Save(context.Background(), a); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.Save(b); err != nil {
+	if err := c.Save(context.Background(), b); err != nil {
 		t.Fatal(err)
 	}
 	if c.path(a.Issuer, a.ClientID) == c.path(b.Issuer, b.ClientID) {
 		t.Fatal("distinct profiles must map to distinct cache files")
 	}
-	gotA, ok, err := c.Load(a.Issuer, a.ClientID)
+	gotA, ok, err := c.Load(context.Background(), a.Issuer, a.ClientID)
 	if err != nil || !ok || gotA.AccessToken != "token-a" {
 		t.Fatalf("profile a: got %+v ok=%v err=%v", gotA, ok, err)
 	}
-	gotB, ok, err := c.Load(b.Issuer, b.ClientID)
+	gotB, ok, err := c.Load(context.Background(), b.Issuer, b.ClientID)
 	if err != nil || !ok || gotB.AccessToken != "token-b" {
 		t.Fatalf("profile b: got %+v ok=%v err=%v", gotB, ok, err)
 	}
@@ -164,14 +189,14 @@ func TestMultiProfile_Independence(t *testing.T) {
 func TestSave_RotatedRefreshTokenPersisted(t *testing.T) {
 	c := New(t.TempDir())
 	e := Entry{Issuer: "iss", ClientID: "cid", RefreshToken: "rt-1"}
-	if err := c.Save(e); err != nil {
+	if err := c.Save(context.Background(), e); err != nil {
 		t.Fatal(err)
 	}
 	e.RefreshToken = "rt-2-rotated"
-	if err := c.Save(e); err != nil {
+	if err := c.Save(context.Background(), e); err != nil {
 		t.Fatal(err)
 	}
-	got, ok, err := c.Load(e.Issuer, e.ClientID)
+	got, ok, err := c.Load(context.Background(), e.Issuer, e.ClientID)
 	if err != nil || !ok {
 		t.Fatalf("Load: %+v ok=%v err=%v", got, ok, err)
 	}

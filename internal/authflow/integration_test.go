@@ -138,7 +138,7 @@ func TestIntegration_NearExpiry_SilentRefresh_UnderLock_NoPrompt(t *testing.T) {
 	cfg := &config.Config{}
 	rnr := newIntegrationRunner(t, m, cfg, &prompt)
 
-	if err := rnr.Cache.Save(cache.Entry{
+	if err := rnr.Cache.Save(context.Background(), cache.Entry{
 		Issuer: cfg.Issuer, ClientID: cfg.ClientID,
 		AccessToken: "stale", RefreshToken: "seed-refresh-token",
 		Expiry: time.Now().Add(-time.Minute),
@@ -170,7 +170,7 @@ func TestIntegration_ConcurrentRefresh_RotationRace_ExactlyOneRefresh(t *testing
 	cfg := &config.Config{Issuer: m.Issuer(), ClientID: oidctest.ClientID}
 
 	seed := cache.New(dir)
-	if err := seed.Save(cache.Entry{
+	if err := seed.Save(context.Background(), cache.Entry{
 		Issuer: cfg.Issuer, ClientID: cfg.ClientID,
 		AccessToken: "stale", RefreshToken: "seed-refresh-token",
 		Expiry: time.Now().Add(-time.Minute),
@@ -220,7 +220,7 @@ func TestIntegration_RefreshFails_FallsBackToDeviceLogin(t *testing.T) {
 	cfg := &config.Config{}
 	rnr := newIntegrationRunner(t, m, cfg, &prompt)
 
-	if err := rnr.Cache.Save(cache.Entry{
+	if err := rnr.Cache.Save(context.Background(), cache.Entry{
 		Issuer: cfg.Issuer, ClientID: cfg.ClientID,
 		AccessToken: "stale", RefreshToken: "revoked-refresh-token",
 		Expiry: time.Now().Add(-time.Minute),
@@ -248,7 +248,7 @@ func TestIntegration_RefreshFails_NonInteractive_FastFail(t *testing.T) {
 	cfg := &config.Config{NonInteractive: true}
 	rnr := newIntegrationRunner(t, m, cfg, &prompt)
 
-	if err := rnr.Cache.Save(cache.Entry{
+	if err := rnr.Cache.Save(context.Background(), cache.Entry{
 		Issuer: cfg.Issuer, ClientID: cfg.ClientID,
 		AccessToken: "stale", RefreshToken: "revoked-refresh-token",
 		Expiry: time.Now().Add(-time.Minute),

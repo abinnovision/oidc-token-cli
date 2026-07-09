@@ -41,9 +41,11 @@ type Config struct {
 	GrantType      GrantType
 	TokenType      TokenType
 	CacheDir       string
-	RedirectPort   int // 0 = ephemeral loopback port (RFC 8252 default)
+	TokenStore     cache.Backend // auto|keychain|file, see cache.Backend
+	RedirectPort   int           // 0 = ephemeral loopback port (RFC 8252 default)
 	NonInteractive bool
 	All            bool // --all: print full JSON document instead of a bare token
+	Logout         bool // --logout: clear the cached entry and exit, no login/refresh
 }
 
 // fileConfig mirrors Config's JSON-file representation. Every field is a
@@ -56,9 +58,11 @@ type fileConfig struct {
 	GrantType      *string `json:"grant_type"`
 	TokenType      *string `json:"token_type"`
 	CacheDir       *string `json:"cache_dir"`
+	TokenStore     *string `json:"token_store"`
 	RedirectPort   *int    `json:"redirect_port"`
 	NonInteractive *bool   `json:"non_interactive"`
 	All            *bool   `json:"all"`
+	Logout         *bool   `json:"logout"`
 }
 
 // Env is the subset of the process environment config.Parse reads from,
@@ -75,7 +79,7 @@ func (e Env) get(key string) string {
 }
 
 var envKeys = struct {
-	issuer, clientID, scope, audience, grantType, tokenType, cacheDir, nonInteractive string
+	issuer, clientID, scope, audience, grantType, tokenType, cacheDir, tokenStore, nonInteractive, logout string
 }{
 	issuer:         "OIDC_TOKEN_ISSUER",
 	clientID:       "OIDC_TOKEN_CLIENT_ID",
@@ -84,7 +88,9 @@ var envKeys = struct {
 	grantType:      "OIDC_TOKEN_GRANT_TYPE",
 	tokenType:      "OIDC_TOKEN_TOKEN_TYPE",
 	cacheDir:       "OIDC_TOKEN_CACHE_DIR",
+	tokenStore:     "OIDC_TOKEN_STORE",
 	nonInteractive: "OIDC_TOKEN_NON_INTERACTIVE",
+	logout:         "OIDC_TOKEN_LOGOUT",
 }
 
 // Parse builds a Config from, in ascending priority: defaults, environment
@@ -110,9 +116,11 @@ func Parse(args []string, stderr io.Writer, env Env) (*Config, error) {
 		grantType      = fs.String("grant-type", string(GrantAuto), "auto|authcode|device-code")
 		tokenType      = fs.String("token-type", string(TokenTypeAccessToken), "access_token|id_token")
 		cacheDirFlag   = fs.String("cache-dir", "", "override the token cache directory (default: $XDG_CACHE_HOME/oidc-token or ~/.cache/oidc-token)")
+		tokenStore     = fs.String("token-store", string(cache.BackendAuto), "auto|keychain|file: where cached tokens are stored")
 		redirectPort   = fs.Int("redirect", 0, "fixed loopback callback port for authcode; 0 selects an ephemeral port")
 		nonInteractive = fs.Bool("non-interactive", false, "fail fast instead of opening a browser or a device-code prompt")
 		all            = fs.Bool("all", false, "print a JSON document with every available credential field instead of a bare token")
+		logout         = fs.Bool("logout", false, "clear the cached entry for --issuer/--client-id and exit, without logging in or refreshing")
 	)
 
 	if err := fs.Parse(args); err != nil {
@@ -120,9 +128,10 @@ func Parse(args []string, stderr io.Writer, env Env) (*Config, error) {
 	}
 
 	cfg := &Config{
-		Scope:     DefaultScope,
-		GrantType: GrantAuto,
-		TokenType: TokenTypeAccessToken,
+		Scope:      DefaultScope,
+		GrantType:  GrantAuto,
+		TokenType:  TokenTypeAccessToken,
+		TokenStore: cache.BackendAuto,
 	}
 
 	// 1. Environment.
@@ -147,8 +156,14 @@ func Parse(args []string, stderr io.Writer, env Env) (*Config, error) {
 	if v := env.get(envKeys.cacheDir); v != "" {
 		cfg.CacheDir = v
 	}
+	if v := env.get(envKeys.tokenStore); v != "" {
+		cfg.TokenStore = cache.Backend(v)
+	}
 	if v := env.get(envKeys.nonInteractive); v != "" {
 		cfg.NonInteractive = v == "1" || v == "true"
+	}
+	if v := env.get(envKeys.logout); v != "" {
+		cfg.Logout = v == "1" || v == "true"
 	}
 
 	// 2. Config file.
@@ -185,6 +200,9 @@ func Parse(args []string, stderr io.Writer, env Env) (*Config, error) {
 	if explicit["cache-dir"] {
 		cfg.CacheDir = *cacheDirFlag
 	}
+	if explicit["token-store"] {
+		cfg.TokenStore = cache.Backend(*tokenStore)
+	}
 	if explicit["redirect"] {
 		cfg.RedirectPort = *redirectPort
 	}
@@ -193,6 +211,9 @@ func Parse(args []string, stderr io.Writer, env Env) (*Config, error) {
 	}
 	if explicit["all"] {
 		cfg.All = *all
+	}
+	if explicit["logout"] {
+		cfg.Logout = *logout
 	}
 
 	if cfg.CacheDir == "" {
@@ -225,6 +246,11 @@ func (c *Config) validate() error {
 	case TokenTypeAccessToken, TokenTypeIDToken:
 	default:
 		return fmt.Errorf("config: invalid --token-type %q (want access_token|id_token)", c.TokenType)
+	}
+	switch c.TokenStore {
+	case cache.BackendAuto, cache.BackendKeychain, cache.BackendFile:
+	default:
+		return fmt.Errorf("config: invalid --token-store %q (want auto|keychain|file)", c.TokenStore)
 	}
 	return nil
 }
@@ -263,6 +289,9 @@ func applyFileConfig(cfg *Config, fc *fileConfig) {
 	if fc.CacheDir != nil {
 		cfg.CacheDir = *fc.CacheDir
 	}
+	if fc.TokenStore != nil {
+		cfg.TokenStore = cache.Backend(*fc.TokenStore)
+	}
 	if fc.RedirectPort != nil {
 		cfg.RedirectPort = *fc.RedirectPort
 	}
@@ -271,5 +300,8 @@ func applyFileConfig(cfg *Config, fc *fileConfig) {
 	}
 	if fc.All != nil {
 		cfg.All = *fc.All
+	}
+	if fc.Logout != nil {
+		cfg.Logout = *fc.Logout
 	}
 }

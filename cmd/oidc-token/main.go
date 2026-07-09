@@ -30,6 +30,29 @@ func main() {
 // config; tests inject a fake in its place.
 type newSourceFunc func(cfg *config.Config) runner.TokenSource
 
+// buildStore constructs the cache.Store selected by cfg.TokenStore.
+// --token-store=keychain probes the keychain up front and fails fast with a
+// clear error rather than surfacing a confusing failure later.
+func buildStore(ctx context.Context, cfg *config.Config, stderr io.Writer) (cache.Store, error) {
+	switch cfg.TokenStore {
+	case cache.BackendFile:
+		return cache.New(cfg.CacheDir), nil
+	case cache.BackendKeychain:
+		ks := cache.NewKeychainStore()
+		if err := ks.Probe(ctx); err != nil {
+			return nil, fmt.Errorf("--token-store=keychain requires a working OS keychain: %w", err)
+		}
+		return ks, nil
+	default: // cache.BackendAuto
+		return &cache.ChainStore{
+			Backends: []cache.Store{cache.NewKeychainStore(), cache.New(cfg.CacheDir)},
+			Logger: func(format string, args ...any) {
+				fmt.Fprintf(stderr, format+"\n", args...)
+			},
+		}, nil
+	}
+}
+
 // run is main's testable core. Every write to stdout happens in exactly one
 // place, guarded by err == nil, so a bug elsewhere cannot leak a partial or
 // empty token onto stdout with a zero exit code.
@@ -45,14 +68,31 @@ func run(args []string, stdout, stderr io.Writer, newSource newSourceFunc) int {
 		return 1
 	}
 
+	ctx := context.Background()
+
+	store, err := buildStore(ctx, cfg, stderr)
+	if err != nil {
+		fmt.Fprintln(stderr, "error:", err)
+		return 1
+	}
+
+	if cfg.Logout {
+		rnr := &runner.Runner{Cache: store, Config: cfg, Stderr: stderr}
+		if err := rnr.Logout(ctx); err != nil {
+			fmt.Fprintln(stderr, "error:", err)
+			return 1
+		}
+		return 0
+	}
+
 	rnr := &runner.Runner{
-		Cache:  cache.New(cfg.CacheDir),
+		Cache:  store,
 		Source: newSource(cfg),
 		Config: cfg,
 		Stderr: stderr,
 	}
 
-	result, err := rnr.Run(context.Background())
+	result, err := rnr.Run(ctx)
 	if err != nil {
 		fmt.Fprintln(stderr, "error:", err)
 		return 1

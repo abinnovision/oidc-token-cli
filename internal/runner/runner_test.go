@@ -54,7 +54,7 @@ func TestRun_ValidCache_NoNetworkCalls(t *testing.T) {
 	src := &fakeSource{}
 	r := newRunner(t, src, nil, nil)
 	now := r.Now()
-	if err := r.Cache.Save(cache.Entry{
+	if err := r.Cache.Save(context.Background(), cache.Entry{
 		Issuer: r.Config.Issuer, ClientID: r.Config.ClientID,
 		AccessToken: "cached-token", Expiry: now.Add(time.Hour),
 	}); err != nil {
@@ -78,7 +78,7 @@ func TestRun_ZeroExpiry_WithRefreshToken_RefreshesEagerly(t *testing.T) {
 		refreshResult: output.Result{AccessToken: "refreshed", RefreshToken: "rt-rotated"},
 	}
 	r := newRunner(t, src, nil, nil)
-	if err := r.Cache.Save(cache.Entry{
+	if err := r.Cache.Save(context.Background(), cache.Entry{
 		Issuer: r.Config.Issuer, ClientID: r.Config.ClientID,
 		AccessToken: "stale-unknown-age", RefreshToken: "rt-old",
 		// Expiry intentionally left zero: no expiry info from the issuer.
@@ -101,7 +101,7 @@ func TestRun_ZeroExpiry_WithRefreshToken_RefreshesEagerly(t *testing.T) {
 func TestRun_ZeroExpiry_NoRefreshToken_ServedIndefinitely(t *testing.T) {
 	src := &fakeSource{}
 	r := newRunner(t, src, nil, nil)
-	if err := r.Cache.Save(cache.Entry{
+	if err := r.Cache.Save(context.Background(), cache.Entry{
 		Issuer: r.Config.Issuer, ClientID: r.Config.ClientID,
 		AccessToken: "only-token-we-have",
 		// Expiry zero, no refresh_token: nothing to refresh with.
@@ -127,7 +127,7 @@ func TestRun_ExpiredCache_RefreshSucceeds_NoLogin(t *testing.T) {
 	}
 	r := newRunner(t, src, nil, nil)
 	now := r.Now()
-	if err := r.Cache.Save(cache.Entry{
+	if err := r.Cache.Save(context.Background(), cache.Entry{
 		Issuer: r.Config.Issuer, ClientID: r.Config.ClientID,
 		AccessToken: "stale", RefreshToken: "rt-old", Expiry: now.Add(-time.Hour),
 	}); err != nil {
@@ -149,7 +149,7 @@ func TestRun_ExpiredCache_RefreshSucceeds_NoLogin(t *testing.T) {
 	}
 
 	// Rotated refresh token must be persisted.
-	entry, ok, err := r.Cache.Load(r.Config.Issuer, r.Config.ClientID)
+	entry, ok, err := r.Cache.Load(context.Background(), r.Config.Issuer, r.Config.ClientID)
 	if err != nil || !ok {
 		t.Fatalf("Load after refresh: ok=%v err=%v", ok, err)
 	}
@@ -165,7 +165,7 @@ func TestRun_RefreshFails_FallsBackToLogin(t *testing.T) {
 	}
 	r := newRunner(t, src, nil, nil)
 	now := r.Now()
-	if err := r.Cache.Save(cache.Entry{
+	if err := r.Cache.Save(context.Background(), cache.Entry{
 		Issuer: r.Config.Issuer, ClientID: r.Config.ClientID,
 		AccessToken: "stale", RefreshToken: "rt-old", Expiry: now.Add(-time.Hour),
 	}); err != nil {
@@ -217,7 +217,7 @@ func TestRun_NoCache_Interactive_LoginSucceeds(t *testing.T) {
 		t.Fatalf("AccessToken = %q, want fresh", res.AccessToken)
 	}
 
-	entry, ok, err := r.Cache.Load(r.Config.Issuer, r.Config.ClientID)
+	entry, ok, err := r.Cache.Load(context.Background(), r.Config.Issuer, r.Config.ClientID)
 	if err != nil || !ok {
 		t.Fatalf("Load after login: ok=%v err=%v", ok, err)
 	}
@@ -248,7 +248,7 @@ func TestRun_CorruptCache_TreatedAsMiss_GoesToLogin(t *testing.T) {
 	r := newRunner(t, src, nil, nil)
 
 	// Simulate a corrupt cache file directly (bypassing Save's JSON encoding).
-	dir := r.Cache.Dir
+	dir := r.Cache.(*cache.Cache).Dir
 	if err := writeCorruptCacheFile(dir, r.Config.Issuer, r.Config.ClientID); err != nil {
 		t.Fatal(err)
 	}
@@ -379,7 +379,7 @@ func writeCorruptCacheFile(dir, issuer, clientID string) error {
 	c := cache.New(dir)
 	// Use Save to create a well-formed file first (ensures dir exists with
 	// correct perms), then overwrite its contents with garbage.
-	if err := c.Save(cache.Entry{Issuer: issuer, ClientID: clientID}); err != nil {
+	if err := c.Save(context.Background(), cache.Entry{Issuer: issuer, ClientID: clientID}); err != nil {
 		return err
 	}
 	return os.WriteFile(c.Path(issuer, clientID), []byte("{not valid json"), 0o600)
