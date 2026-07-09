@@ -47,6 +47,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write
     steps:
       - uses: actions/checkout@v7
         with:
@@ -78,6 +79,35 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag -a "$NEXT" -m "$NEXT"
           git push origin "refs/tags/$NEXT"
+      - name: Fetch homebrew-tap token from gh-token-broker
+        if: steps.svu.outputs.release == 'true'
+        id: gtb
+        env:
+          GTB_URL: ${{ secrets.GTB_URL }}
+          GTB_AUDIENCE: gh-token-broker # must match the broker's configured oidc.audience
+        run: |
+          set -euo pipefail
+
+          id_token_response=$(curl -sf \
+            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${GTB_AUDIENCE}")
+          id_token=$(echo "${id_token_response}" | jq -r ".value")
+
+          response=$(curl -sf \
+            --header "Content-Type: application/json" \
+            --request POST \
+            --header "Authorization: Bearer ${id_token}" \
+            --data '{"repositories":["abinnovision/homebrew-tap"],"permissions":{"contents":"write"}}' \
+            "${GTB_URL}/token")
+
+          token=$(echo "${response}" | jq -r ".token")
+          if [ -z "${token}" ] || [ "${token}" = "null" ]; then
+            echo "gh-token-broker returned no token" >&2
+            exit 1
+          fi
+
+          echo "::add-mask::${token}"
+          echo "token=${token}" >> "$GITHUB_OUTPUT"
       - uses: goreleaser/goreleaser-action@v7
         if: steps.svu.outputs.release == 'true'
         with:
@@ -85,3 +115,4 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ steps.gtb.outputs.token }}
