@@ -17,6 +17,29 @@ import (
 // shrink it.
 var deviceLoginFallbackTimeout = 15 * time.Minute
 
+// maxDeviceAssertionLifetime caps how long a private_key_jwt assertion
+// minted for the device-code flow is allowed to live, even if the device
+// code itself is valid longer.
+const maxDeviceAssertionLifetime = 15 * time.Minute
+
+// deviceAssertionLifetime sizes a private_key_jwt assertion's exp off the
+// device code's own expiry, so it survives DeviceAccessToken's internal
+// poll loop; it falls back to clientAssertionLifetime if expiry is unknown
+// or already past, and is capped at maxDeviceAssertionLifetime.
+func deviceAssertionLifetime(expiry time.Time) time.Duration {
+	if expiry.IsZero() {
+		return clientAssertionLifetime
+	}
+	remaining := time.Until(expiry)
+	if remaining <= 0 {
+		return clientAssertionLifetime
+	}
+	if remaining > maxDeviceAssertionLifetime {
+		return maxDeviceAssertionLifetime
+	}
+	return remaining
+}
+
 // DeviceLogin runs the RFC 8628 device-authorization grant: fetch a device
 // code + user code, print the verification URL and code to prompt (stderr
 // only — never stdout), then poll the token endpoint until the user
@@ -58,7 +81,18 @@ func (p *Provider) DeviceLogin(ctx context.Context, scope string, prompt io.Writ
 		}
 	}
 
-	tok, err := cfg.DeviceAccessToken(ctx, da, opts...)
+	// DeviceAccessToken polls internally with no hook to refresh options
+	// between polls, so a private_key_jwt assertion minted here must
+	// outlive the whole poll loop: size it off the device code's own
+	// expiry (capped at maxDeviceAssertionLifetime) rather than the
+	// shorter fixed window used by the other two flows.
+	assertionOpts, err := p.clientAssertionOptions(deviceAssertionLifetime(da.Expiry))
+	if err != nil {
+		return output.Result{}, err
+	}
+	tokenOpts := append(append([]oauth2.AuthCodeOption{}, opts...), assertionOpts...)
+
+	tok, err := cfg.DeviceAccessToken(ctx, da, tokenOpts...)
 	if err != nil {
 		return output.Result{}, fmt.Errorf("oidc: device-code token exchange failed: %w", err)
 	}

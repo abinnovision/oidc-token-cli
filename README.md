@@ -17,7 +17,11 @@ cache is cold.
 - **Success:** exactly the token bytes on stdout (no trailing newline), exit 0.
 - **Failure:** non-zero exit, message on stderr, empty stdout — never a
   partial or placeholder token.
-- Public client + PKCE only — no client secret handling.
+- Public client by default (PKCE, no secret). Confidential clients are
+  opt-in via `--client-auth-method` — see
+  [Confidential clients](#confidential-clients). mTLS client
+  authentication (`tls_client_auth`) and RFC 8693 token exchange are not
+  supported.
 
 ## Install
 
@@ -38,13 +42,17 @@ oidc-token \
   [--redirect PORT] \
   [--non-interactive] \
   [--all] \
-  [--config FILE]
+  [--config FILE] \
+  [--client-auth-method client_secret_basic|client_secret_post|private_key_jwt] \
+  [--client-secret SECRET | --client-secret-file FILE] \
+  [--private-key-file FILE] [--private-key-id KID] [--private-key-alg ALG] \
+  [--client-assertion-audience AUD]
 ```
 
 | Flag | Default | Description |
 |---|---|---|
 | `--issuer` | *(required)* | OIDC issuer URL (HTTPS, except loopback in tests). Discovery's `issuer` field must match exactly. |
-| `--client-id` | *(required)* | OAuth2/OIDC public client ID. |
+| `--client-id` | *(required)* | OAuth2/OIDC client ID. |
 | `--scope` | `openid offline_access` | Space-separated scopes. |
 | `--audience` | *(empty)* | Expected `aud` claim — required if the relying party checks audience (e.g. frp's `auth.oidc.audience`). |
 | `--grant-type` | `auto` | `auto`, `authcode`, or `device-code`. See [Grant selection](#grant-selection). |
@@ -54,12 +62,24 @@ oidc-token \
 | `--non-interactive` | `false` | Never emit a device-code prompt; authcode+browser is still allowed if a display is available. |
 | `--all` | `false` | Print a JSON document instead of a bare token. |
 | `--config` | *(none)* | Optional JSON config file. |
+| `--client-auth-method` | *(none, public client)* | `client_secret_basic`, `client_secret_post`, or `private_key_jwt`. See [Confidential clients](#confidential-clients). |
+| `--client-secret` / `--client-secret-file` | *(none)* | Client secret for `client_secret_basic`/`client_secret_post`. Prefer `--client-secret-file` or `$OIDC_TOKEN_CLIENT_SECRET` over the bare flag; `--client-secret-file` wins if both are set. |
+| `--private-key-file` | *(none)* | PEM file (PKCS#1/PKCS#8/EC) used to sign the `private_key_jwt` client assertion. |
+| `--private-key-id` | *(none)* | Optional `kid` header on the client assertion. |
+| `--private-key-alg` | `RS256` | JWS signing algorithm: `RS256`/`RS384`/`RS512`/`PS256`/`PS384`/`PS512`/`ES256`/`ES384`/`ES512`. |
+| `--client-assertion-audience` | *(the discovered token endpoint)* | Override the assertion's `aud` claim, for issuers that expect the issuer URL or something else instead. |
 
-Every flag except `--config` also has an env var: `OIDC_TOKEN_ISSUER`,
-`OIDC_TOKEN_CLIENT_ID`, `OIDC_TOKEN_SCOPE`, `OIDC_TOKEN_AUDIENCE`,
-`OIDC_TOKEN_GRANT_TYPE`, `OIDC_TOKEN_TOKEN_TYPE`, `OIDC_TOKEN_CACHE_DIR`,
-`OIDC_TOKEN_NON_INTERACTIVE`. Precedence: defaults < env < `--config` file
-< explicit flags.
+Every flag except `--config`/`--client-secret-file` also has an env var:
+`OIDC_TOKEN_ISSUER`, `OIDC_TOKEN_CLIENT_ID`, `OIDC_TOKEN_SCOPE`,
+`OIDC_TOKEN_AUDIENCE`, `OIDC_TOKEN_GRANT_TYPE`, `OIDC_TOKEN_TOKEN_TYPE`,
+`OIDC_TOKEN_CACHE_DIR`, `OIDC_TOKEN_NON_INTERACTIVE`,
+`OIDC_TOKEN_CLIENT_AUTH_METHOD`, `OIDC_TOKEN_CLIENT_SECRET`,
+`OIDC_TOKEN_PRIVATE_KEY_FILE`, `OIDC_TOKEN_PRIVATE_KEY_ID`,
+`OIDC_TOKEN_PRIVATE_KEY_ALG`, `OIDC_TOKEN_CLIENT_ASSERTION_AUDIENCE`.
+`OIDC_TOKEN_CLIENT_SECRET` (or `--client-secret-file`) is the recommended
+way to pass a secret — avoid `--client-secret` on the command line where
+it can land in shell history or process listings. Precedence: defaults <
+env < `--config` file < explicit flags.
 
 ### Grant selection
 
@@ -78,6 +98,29 @@ capped at 2 attempts total, no cycling back. `--grant-type=authcode` or
 `=device-code` forces one grant and fails fast if it isn't viable, with a
 diagnostic describing what the IdP offers and why browser/terminal
 viability failed.
+
+### Confidential clients
+
+By default `oidc-token` is a public client: no secret, no client
+authentication on token requests. Setting `--client-auth-method` switches
+it to a confidential client for all three grants (authcode, device-code,
+refresh):
+
+- **`client_secret_basic`** / **`client_secret_post`** — send
+  `--client-secret` (or, preferably, `--client-secret-file`/
+  `$OIDC_TOKEN_CLIENT_SECRET`) as HTTP Basic auth or a POST body param,
+  respectively.
+- **`private_key_jwt`** (RFC 7523) — sign a fresh, short-lived JWT
+  assertion per token request with `--private-key-file` (PEM,
+  PKCS#1/PKCS#8/EC). `--private-key-id` sets an optional `kid` header for
+  issuers that select the verification key from a registered JWKS.
+  `--client-assertion-audience` overrides the assertion's `aud` claim if
+  your issuer expects something other than the discovered token endpoint
+  (conventions vary between IdPs — check yours if authentication fails
+  with an audience-related error).
+
+Not supported: mTLS client authentication (`tls_client_auth`) and RFC 8693
+token exchange.
 
 ### Cache
 

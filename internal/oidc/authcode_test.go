@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	jose "github.com/go-jose/go-jose/v4"
+
 	"github.com/abinnovision/oidc-token-cli/internal/oidctest"
 )
 
@@ -304,5 +306,62 @@ func TestAuthCodeLogin_NonceMismatch_RecordsIDTokenError_NotHardFailure(t *testi
 	}
 	if !strings.Contains(res.IDTokenError.Error(), "nonce") {
 		t.Fatalf("IDTokenError should mention nonce, got: %v", res.IDTokenError)
+	}
+}
+
+func TestAuthCodeLogin_PrivateKeyJWT_Success(t *testing.T) {
+	m := oidctest.NewMockIssuer(t)
+	m.IncludeIDToken = true
+	key := generateTestKey(t)
+	m.RequireClientAuth = "private_key_jwt"
+	m.ExpectedAssertionKey = &key.PublicKey
+
+	p, err := Discover(context.Background(), m.Issuer(), oidctest.ClientID)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	p.SetClientAuth(ClientAuthPrivateKeyJWT, "", key, "", jose.RS256, "")
+
+	var prompt bytes.Buffer
+	openBrowser := func(u string) error {
+		return simulateBrowser(t, m, u, oidctest.MockAuthCode, "", "")(u)
+	}
+
+	res, err := p.AuthCodeLogin(context.Background(), "openid offline_access", 0, openBrowser, &prompt, &prompt)
+	if err != nil {
+		t.Fatalf("AuthCodeLogin: %v", err)
+	}
+	if res.AccessToken == "" {
+		t.Fatal("expected a non-empty access_token")
+	}
+	if res.IDToken == "" {
+		t.Fatal("expected a non-empty (and verified) id_token")
+	}
+	if len(m.AssertionJTIs()) != 1 {
+		t.Fatalf("expected exactly one verified client assertion, got %d", len(m.AssertionJTIs()))
+	}
+}
+
+func TestAuthCodeLogin_PrivateKeyJWT_WrongKey_Rejected(t *testing.T) {
+	m := oidctest.NewMockIssuer(t)
+	signingKey := generateTestKey(t)
+	otherKey := generateTestKey(t)
+	m.RequireClientAuth = "private_key_jwt"
+	m.ExpectedAssertionKey = &otherKey.PublicKey
+
+	p, err := Discover(context.Background(), m.Issuer(), oidctest.ClientID)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	p.SetClientAuth(ClientAuthPrivateKeyJWT, "", signingKey, "", jose.RS256, "")
+
+	var prompt bytes.Buffer
+	openBrowser := simulateBrowser(t, m, "", oidctest.MockAuthCode, "", "")
+
+	_, err = p.AuthCodeLogin(context.Background(), "openid", 0, func(u string) error {
+		return openBrowser(u)
+	}, &prompt, &prompt)
+	if err == nil {
+		t.Fatal("expected an error for an assertion signed with the wrong key")
 	}
 }

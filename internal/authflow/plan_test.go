@@ -2,11 +2,15 @@ package authflow
 
 import (
 	"context"
+	"crypto"
 	"errors"
 	"io"
 	"strings"
 	"testing"
 
+	jose "github.com/go-jose/go-jose/v4"
+
+	"github.com/abinnovision/oidc-token-cli/internal/oidc"
 	"github.com/abinnovision/oidc-token-cli/internal/output"
 )
 
@@ -42,6 +46,8 @@ func (f *fakeProvider) SupportsGrant(grant string) bool {
 func (f *fakeProvider) SupportsDeviceCode() bool { return f.supportsDevice }
 func (f *fakeProvider) SetAudience(string)       {}
 func (f *fakeProvider) AdvertisedGrants() string { return "fake-provider-grants" }
+func (f *fakeProvider) SetClientAuth(oidc.ClientAuthMethod, string, crypto.Signer, string, jose.SignatureAlgorithm, string) {
+}
 
 func (f *fakeProvider) DeviceLogin(ctx context.Context, scope string, prompt io.Writer) (output.Result, error) {
 	f.deviceCalls++
