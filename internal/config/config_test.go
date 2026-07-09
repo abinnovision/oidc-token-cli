@@ -403,3 +403,109 @@ func TestParse_ClientAssertionAudience_FlagOverride(t *testing.T) {
 		t.Errorf("ClientAssertionAudience = %q, want override", cfg.ClientAssertionAudience)
 	}
 }
+
+func TestParse_TokenExchange_RequiresSubjectToken(t *testing.T) {
+	var stderr bytes.Buffer
+	_, err := Parse([]string{
+		"--issuer=https://issuer.example", "--client-id=cid", "--grant-type=token-exchange",
+	}, &stderr, Env{Getenv: noEnv})
+	if err == nil {
+		t.Fatal("expected error when --grant-type=token-exchange is set without --subject-token")
+	}
+}
+
+func TestParse_TokenExchange_WithSubjectToken_Succeeds(t *testing.T) {
+	var stderr bytes.Buffer
+	cfg, err := Parse([]string{
+		"--issuer=https://issuer.example", "--client-id=cid", "--grant-type=token-exchange",
+		"--subject-token=sub-tok",
+	}, &stderr, Env{Getenv: noEnv})
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.SubjectToken != "sub-tok" {
+		t.Errorf("SubjectToken = %q, want sub-tok", cfg.SubjectToken)
+	}
+	if cfg.SubjectTokenType != DefaultSubjectTokenType {
+		t.Errorf("SubjectTokenType = %q, want default %q", cfg.SubjectTokenType, DefaultSubjectTokenType)
+	}
+}
+
+func TestParse_SubjectTokenFile_TakesPrecedenceOverFlag(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "subject-token")
+	if err := os.WriteFile(path, []byte("file-subject-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	cfg, err := Parse([]string{
+		"--issuer=https://issuer.example", "--client-id=cid", "--grant-type=token-exchange",
+		"--subject-token=flag-subject-token",
+		"--subject-token-file=" + path,
+	}, &stderr, Env{Getenv: noEnv})
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.SubjectToken != "file-subject-token" {
+		t.Errorf("SubjectToken = %q, want the file's contents (trailing newline trimmed) to win over --subject-token", cfg.SubjectToken)
+	}
+}
+
+func TestParse_SubjectToken_EnvOverridesDefaults(t *testing.T) {
+	env := envFrom(map[string]string{
+		"OIDC_TOKEN_SUBJECT_TOKEN":      "env-subject-token",
+		"OIDC_TOKEN_SUBJECT_TOKEN_TYPE": "urn:ietf:params:oauth:token-type:id_token",
+	})
+	var stderr bytes.Buffer
+	cfg, err := Parse([]string{
+		"--issuer=https://issuer.example", "--client-id=cid", "--grant-type=token-exchange",
+	}, &stderr, Env{Getenv: env})
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.SubjectToken != "env-subject-token" {
+		t.Errorf("SubjectToken = %q, want env override", cfg.SubjectToken)
+	}
+	if cfg.SubjectTokenType != "urn:ietf:params:oauth:token-type:id_token" {
+		t.Errorf("SubjectTokenType = %q, want env override", cfg.SubjectTokenType)
+	}
+}
+
+func TestParse_Resource_Repeatable(t *testing.T) {
+	var stderr bytes.Buffer
+	cfg, err := Parse([]string{
+		"--issuer=https://issuer.example", "--client-id=cid", "--grant-type=token-exchange",
+		"--subject-token=sub-tok",
+		"--resource=https://a.example/", "--resource=https://b.example/",
+	}, &stderr, Env{Getenv: noEnv})
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	want := []string{"https://a.example/", "https://b.example/"}
+	if len(cfg.Resources) != len(want) || cfg.Resources[0] != want[0] || cfg.Resources[1] != want[1] {
+		t.Errorf("Resources = %v, want %v", cfg.Resources, want)
+	}
+}
+
+func TestParse_RequestedTokenType_OptionalOmitted(t *testing.T) {
+	var stderr bytes.Buffer
+	cfg, err := Parse([]string{
+		"--issuer=https://issuer.example", "--client-id=cid", "--grant-type=token-exchange",
+		"--subject-token=sub-tok",
+	}, &stderr, Env{Getenv: noEnv})
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.RequestedTokenType != "" {
+		t.Errorf("RequestedTokenType = %q, want empty when unset", cfg.RequestedTokenType)
+	}
+}
+
+func TestParse_SubjectTokenWithoutGrantType_Errors(t *testing.T) {
+	var stderr bytes.Buffer
+	_, err := Parse([]string{
+		"--issuer=https://issuer.example", "--client-id=cid", "--subject-token=sub-tok",
+	}, &stderr, Env{Getenv: noEnv})
+	if err == nil {
+		t.Fatal("expected error when --subject-token is set without --grant-type=token-exchange")
+	}
+}

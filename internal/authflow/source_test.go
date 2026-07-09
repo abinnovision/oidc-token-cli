@@ -229,3 +229,40 @@ func TestSourceRefresh_DelegatesToProvider(t *testing.T) {
 		t.Fatalf("AccessToken = %q, want refreshed", res.AccessToken)
 	}
 }
+
+func TestSourceTokenExchange_DelegatesToProvider(t *testing.T) {
+	fp := &fakeProvider{loginResult: output.Result{AccessToken: "exchanged"}}
+	var prompt bytes.Buffer
+	s := newTestSource(fp, GrantTokenExchange, Environment{}, false, &prompt)
+
+	res, err := s.TokenExchange(context.Background(), "subject-tok", "urn:ietf:params:oauth:token-type:access_token", "urn:ietf:params:oauth:token-type:jwt", []string{"https://a.example/"})
+	if err != nil {
+		t.Fatalf("TokenExchange: %v", err)
+	}
+	if res.AccessToken != "exchanged" {
+		t.Fatalf("AccessToken = %q, want exchanged", res.AccessToken)
+	}
+	if fp.lastTokenExchangeSubjectToken != "subject-tok" {
+		t.Errorf("subjectToken = %q, want subject-tok", fp.lastTokenExchangeSubjectToken)
+	}
+	if fp.lastTokenExchangeSubjectTokenType != "urn:ietf:params:oauth:token-type:access_token" {
+		t.Errorf("subjectTokenType = %q, want the passed value", fp.lastTokenExchangeSubjectTokenType)
+	}
+	if fp.lastTokenExchangeRequestedType != "urn:ietf:params:oauth:token-type:jwt" {
+		t.Errorf("requestedTokenType = %q, want the passed value", fp.lastTokenExchangeRequestedType)
+	}
+	if len(fp.lastTokenExchangeResources) != 1 || fp.lastTokenExchangeResources[0] != "https://a.example/" {
+		t.Errorf("resources = %v, want [https://a.example/]", fp.lastTokenExchangeResources)
+	}
+}
+
+func TestSourceTokenExchange_PropagatesError(t *testing.T) {
+	fp := &fakeProvider{tokenExchangeErr: errors.New("issuer rejected subject_token")}
+	var prompt bytes.Buffer
+	s := newTestSource(fp, GrantTokenExchange, Environment{}, false, &prompt)
+
+	_, err := s.TokenExchange(context.Background(), "subject-tok", "urn:ietf:params:oauth:token-type:access_token", "", nil)
+	if err == nil {
+		t.Fatal("expected an error to propagate from the provider")
+	}
+}

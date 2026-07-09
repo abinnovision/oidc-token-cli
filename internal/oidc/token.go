@@ -26,6 +26,10 @@ func (p *Provider) toResult(ctx context.Context, tok *oauth2.Token, expectedNonc
 		Expiry:       tok.Expiry,
 	}
 
+	if issuedTokenType, ok := tok.Extra("issued_token_type").(string); ok {
+		res.IssuedTokenType = issuedTokenType
+	}
+
 	raw, ok := tok.Extra("id_token").(string)
 	if ok && raw != "" {
 		idt, err := p.verifier.Verify(ctx, raw)

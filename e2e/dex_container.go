@@ -21,6 +21,15 @@ import (
 // dexImage is pinned exactly; bump deliberately and re-check
 // e2e/testdata/dex-config.yaml.tmpl and dex_login.go's form-scraping regex
 // against the new tag's config schema and web/templates/password.html.
+//
+// dex v2.42.0 does support the RFC 8693 token-exchange grant, but only as a
+// connector-scoped "upstream token exchange": it requires a mandatory
+// connector_id parameter outside RFC 8693's core param set, and only
+// accepts a subject_token actually issued by that configured upstream
+// connector -- not an arbitrary access_token/id_token supplied out-of-band,
+// which is this CLI's generic subject_token/subject_token_type design.
+// Token-exchange e2e coverage therefore uses oidctest.MockIssuer instead of
+// a real dex round-trip; see e2e/tokenexchange_test.go.
 const dexImage = "dexidp/dex:v2.42.0"
 
 // dexClientID is the public (no client_secret) client registered in every

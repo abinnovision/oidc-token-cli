@@ -30,6 +30,26 @@ func (f fakeSource) Login(ctx context.Context) (output.Result, error) {
 	return f.loginResult, f.loginErr
 }
 
+// fakeTokenExchange is the network-facing double injected in place of
+// newRealTokenExchangeSource.
+type fakeTokenExchange struct {
+	result output.Result
+	err    error
+}
+
+func (f fakeTokenExchange) TokenExchange(ctx context.Context, subjectToken, subjectTokenType, requestedTokenType string, resources []string) (output.Result, error) {
+	return f.result, f.err
+}
+
+// failTokenExchange returns a newTokenExchangeFunc that fails the test if
+// invoked, for tests exercising grants other than token-exchange.
+func failTokenExchange(t *testing.T) newTokenExchangeFunc {
+	return func(cfg *config.Config) tokenExchanger {
+		t.Fatal("must not construct a tokenExchanger")
+		return nil
+	}
+}
+
 func TestRun_Success_BareTokenExactBytes_EmptyStderr_ExitZero(t *testing.T) {
 	dir := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -39,7 +59,7 @@ func TestRun_Success_BareTokenExactBytes_EmptyStderr_ExitZero(t *testing.T) {
 		"--cache-dir=" + filepath.Join(dir, "cache"), "--token-store=file",
 	}, &stdout, &stderr, func(cfg *config.Config) runner.TokenSource {
 		return fakeSource{loginResult: output.Result{AccessToken: "the-access-token", RefreshToken: "rt"}}
-	})
+	}, failTokenExchange(t))
 
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr.String())
@@ -61,7 +81,7 @@ func TestRun_Success_All_ValidJSON(t *testing.T) {
 		"--cache-dir=" + filepath.Join(dir, "cache"), "--token-store=file",
 	}, &stdout, &stderr, func(cfg *config.Config) runner.TokenSource {
 		return fakeSource{loginResult: output.Result{AccessToken: "at", IDToken: "it", RefreshToken: "rt"}}
-	})
+	}, failTokenExchange(t))
 
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr.String())
@@ -81,7 +101,7 @@ func TestRun_LoginFailure_ExitNonZero_EmptyStdout_NonEmptyStderr(t *testing.T) {
 		"--cache-dir=" + filepath.Join(dir, "cache"), "--token-store=file",
 	}, &stdout, &stderr, func(cfg *config.Config) runner.TokenSource {
 		return fakeSource{loginErr: errors.New("mock issuer rejected login")}
-	})
+	}, failTokenExchange(t))
 
 	if code == 0 {
 		t.Fatal("exit code = 0, want non-zero on failure")
@@ -104,7 +124,7 @@ func TestRun_NoViableGrant_ExitNonZero_EmptyStdout(t *testing.T) {
 		"--cache-dir=" + filepath.Join(dir, "cache"), "--token-store=file",
 	}, &stdout, &stderr, func(cfg *config.Config) runner.TokenSource {
 		return fakeSource{loginErr: errors.New(diagnostic)}
-	})
+	}, failTokenExchange(t))
 
 	if code == 0 {
 		t.Fatal("exit code = 0, want non-zero when no grant is viable")
@@ -123,7 +143,7 @@ func TestRun_MissingRequiredFlags_ExitNonZero_EmptyStdout(t *testing.T) {
 	code := run(nil, &stdout, &stderr, func(cfg *config.Config) runner.TokenSource {
 		t.Fatal("must not construct a TokenSource when config validation fails")
 		return nil
-	})
+	}, failTokenExchange(t))
 
 	if code == 0 {
 		t.Fatal("exit code = 0, want non-zero when --issuer/--client-id are missing")
@@ -142,7 +162,7 @@ func TestRun_Help_ExitZero_EmptyStdout(t *testing.T) {
 	code := run([]string{"--help"}, &stdout, &stderr, func(cfg *config.Config) runner.TokenSource {
 		t.Fatal("must not construct a TokenSource for --help")
 		return nil
-	})
+	}, failTokenExchange(t))
 
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0 for --help", code)
@@ -161,7 +181,7 @@ func TestRun_RequestedTokenTypeMissing_ExitNonZero_EmptyStdout(t *testing.T) {
 		"--cache-dir=" + filepath.Join(dir, "cache"), "--token-store=file",
 	}, &stdout, &stderr, func(cfg *config.Config) runner.TokenSource {
 		return fakeSource{loginResult: output.Result{AccessToken: "at-only"}}
-	})
+	}, failTokenExchange(t))
 
 	if code == 0 {
 		t.Fatal("exit code = 0, want non-zero when the requested token type is absent")
@@ -210,7 +230,7 @@ func TestRun_Logout_ClearsCacheEntry_ExitZero(t *testing.T) {
 		"--token-store=file", "--cache-dir=" + cacheDir,
 	}, &stdout, &stderr, func(cfg *config.Config) runner.TokenSource {
 		return fakeSource{loginResult: output.Result{AccessToken: "at", RefreshToken: "rt"}}
-	})
+	}, failTokenExchange(t))
 	if code != 0 {
 		t.Fatalf("bootstrap exit code = %d (stderr: %s)", code, stderr.String())
 	}
@@ -223,7 +243,7 @@ func TestRun_Logout_ClearsCacheEntry_ExitZero(t *testing.T) {
 	}, &stdout, &stderr, func(cfg *config.Config) runner.TokenSource {
 		t.Fatal("--logout must not construct a TokenSource")
 		return nil
-	})
+	}, failTokenExchange(t))
 	if code != 0 {
 		t.Fatalf("logout exit code = %d, want 0 (stderr: %s)", code, stderr.String())
 	}
@@ -241,7 +261,7 @@ func TestRun_Logout_ClearsCacheEntry_ExitZero(t *testing.T) {
 	}, &stdout, &stderr, func(cfg *config.Config) runner.TokenSource {
 		loginCalled = true
 		return fakeSource{loginResult: output.Result{AccessToken: "at-2", RefreshToken: "rt-2"}}
-	})
+	}, failTokenExchange(t))
 	if code != 0 {
 		t.Fatalf("post-logout exit code = %d (stderr: %s)", code, stderr.String())
 	}
@@ -272,5 +292,90 @@ func TestHelpSubprocess(t *testing.T) {
 	}
 	if stdout.Len() != 0 {
 		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+}
+
+func TestRun_TokenExchange_BypassesCacheAndStore(t *testing.T) {
+	dir := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	newSourceCalled := false
+	newSource := func(cfg *config.Config) runner.TokenSource {
+		newSourceCalled = true
+		t.Fatal("must not construct a runner.TokenSource for --grant-type=token-exchange")
+		return nil
+	}
+	newTokenExchange := func(cfg *config.Config) tokenExchanger {
+		return fakeTokenExchange{result: output.Result{AccessToken: "exchanged-token"}}
+	}
+
+	code := run([]string{
+		"--issuer=https://issuer.example", "--client-id=cid", "--grant-type=token-exchange",
+		"--subject-token=sub-tok",
+		// A cache dir under a path that doesn't exist: if token-exchange
+		// ever touched the store, buildStore/cache writes would fail loudly.
+		"--cache-dir=" + filepath.Join(dir, "does-not-exist", "cache"), "--token-store=file",
+	}, &stdout, &stderr, newSource, newTokenExchange)
+
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr.String())
+	}
+	if got := stdout.String(); got != "exchanged-token" {
+		t.Fatalf("stdout = %q, want exact token bytes", got)
+	}
+	if newSourceCalled {
+		t.Fatal("must not have called newSource for --grant-type=token-exchange")
+	}
+}
+
+func TestRun_TokenExchange_All_ValidJSON(t *testing.T) {
+	dir := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	newTokenExchange := func(cfg *config.Config) tokenExchanger {
+		return fakeTokenExchange{result: output.Result{AccessToken: "at", IssuedTokenType: "urn:ietf:params:oauth:token-type:jwt"}}
+	}
+
+	code := run([]string{
+		"--issuer=https://issuer.example", "--client-id=cid", "--grant-type=token-exchange",
+		"--subject-token=sub-tok", "--all",
+		"--cache-dir=" + filepath.Join(dir, "cache"), "--token-store=file",
+	}, &stdout, &stderr, func(cfg *config.Config) runner.TokenSource {
+		t.Fatal("must not construct a runner.TokenSource for --grant-type=token-exchange")
+		return nil
+	}, newTokenExchange)
+
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr.String())
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &doc); err != nil {
+		t.Fatalf("--all stdout is not valid JSON: %v, raw: %s", err, stdout.String())
+	}
+	if doc["issued_token_type"] != "urn:ietf:params:oauth:token-type:jwt" {
+		t.Fatalf("issued_token_type = %v, want the exchanged value", doc["issued_token_type"])
+	}
+}
+
+func TestRun_TokenExchange_Failure_ExitNonZero_EmptyStdout(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	newTokenExchange := func(cfg *config.Config) tokenExchanger {
+		return fakeTokenExchange{err: errors.New("issuer rejected subject_token")}
+	}
+
+	code := run([]string{
+		"--issuer=https://issuer.example", "--client-id=cid", "--grant-type=token-exchange",
+		"--subject-token=sub-tok",
+	}, &stdout, &stderr, func(cfg *config.Config) runner.TokenSource {
+		t.Fatal("must not construct a runner.TokenSource for --grant-type=token-exchange")
+		return nil
+	}, newTokenExchange)
+
+	if code == 0 {
+		t.Fatal("exit code = 0, want non-zero on token-exchange failure")
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty on failure", stdout.String())
 	}
 }
