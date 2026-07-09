@@ -1,0 +1,78 @@
+name: ci
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: go build ./...
+      - run: go vet ./...
+      - run: go test -race ./...
+
+  release:
+    # Tag + release only after the full test matrix is green, and only on
+    # pushes to main (never on pull requests).
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # svu and the GoReleaser changelog need full history + tags
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Compute next version
+        id: svu
+        env:
+          GOTOOLCHAIN: auto # setup-go@v6 defaults to 'local'; svu may need a newer toolchain than go.mod
+        run: |
+          go install github.com/caarlos0/svu/v3@latest
+          current="$(svu current 2>/dev/null || echo v0.0.0)"
+          next="$(svu next)"
+          echo "current=${current} next=${next}"
+          echo "next=${next}" >> "$GITHUB_OUTPUT"
+          if [ "${next}" = "${current}" ]; then
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Create tag
+        if: steps.svu.outputs.release == 'true'
+        env:
+          NEXT: ${{ steps.svu.outputs.next }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$NEXT" -m "$NEXT"
+          git push origin "refs/tags/$NEXT"
+      - uses: goreleaser/goreleaser-action@v7
+        if: steps.svu.outputs.release == 'true'
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Publishing the `brews` Formula requires push access to a
+          # separate abinnovision/homebrew-tap repo; GITHUB_TOKEN only has
+          # write access to this repo. Set a HOMEBREW_TAP_GITHUB_TOKEN
+          # secret (a PAT scoped to the tap repo) once that repo exists,
+          # or the formula-publish step will fail on release.
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
