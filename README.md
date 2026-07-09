@@ -41,8 +41,8 @@ oidc-token \
   [--audience my-api] \
   [--grant-type auto|authcode|device-code|token-exchange] \
   [--token-type access_token|id_token] \
-  [--cache-dir DIR] \
-  [--token-store auto|keychain|file] \
+  [--token-store-dir DIR] \
+  [--token-store auto|keychain|file|none] \
   [--redirect PORT] \
   [--non-interactive] \
   [--all] \
@@ -64,8 +64,8 @@ oidc-token \
 | `--audience` | *(empty)* | Expected `aud` claim — required if the relying party checks audience (e.g. frp's `auth.oidc.audience`). |
 | `--grant-type` | `auto` | `auto`, `authcode`, `device-code`, or `token-exchange`. See [Grant selection](#grant-selection) and [Token exchange](#token-exchange-rfc-8693). |
 | `--token-type` | `access_token` | Which field bare mode prints. |
-| `--cache-dir` | `$XDG_CACHE_HOME/oidc-token` | Override the token cache directory (used by the `file` backend and, in `auto` mode, as the fallback store). |
-| `--token-store` | `auto` | `auto`, `keychain`, or `file`. See [Cache](#cache). |
+| `--token-store-dir` | `$XDG_CACHE_HOME/oidc-token` | Override the token store directory (used by the `file` backend and, in `auto` mode, as the fallback store). Ignored when `--token-store=none`. |
+| `--token-store` | `auto` | `auto`, `keychain`, `file`, or `none`. See [Token store](#token-store). |
 | `--redirect` | `0` (ephemeral) | Fixed loopback port for the authcode callback, if your IdP requires an exact redirect URI. |
 | `--non-interactive` | `false` | Never emit a device-code prompt; authcode+browser is still allowed if a display is available. |
 | `--all` | `false` | Print a JSON document instead of a bare token. |
@@ -85,7 +85,7 @@ oidc-token \
 Every flag except `--config`/`--client-secret-file`/`--subject-token-file`/
 `--resource` also has an env var: `OIDC_TOKEN_ISSUER`,
 `OIDC_TOKEN_CLIENT_ID`, `OIDC_TOKEN_SCOPE`, `OIDC_TOKEN_AUDIENCE`,
-`OIDC_TOKEN_GRANT_TYPE`, `OIDC_TOKEN_TOKEN_TYPE`, `OIDC_TOKEN_CACHE_DIR`,
+`OIDC_TOKEN_GRANT_TYPE`, `OIDC_TOKEN_TOKEN_TYPE`, `OIDC_TOKEN_STORE_DIR`,
 `OIDC_TOKEN_STORE`, `OIDC_TOKEN_NON_INTERACTIVE`, `OIDC_TOKEN_LOGOUT`,
 `OIDC_TOKEN_CLIENT_AUTH_METHOD`, `OIDC_TOKEN_CLIENT_SECRET`,
 `OIDC_TOKEN_PRIVATE_KEY_FILE`, `OIDC_TOKEN_PRIVATE_KEY_ID`,
@@ -162,7 +162,7 @@ the wrong one.
 - With `--all`, the response's `issued_token_type` (RFC 8693 §2.2.1) is
   included in the JSON document.
 
-### Cache
+### Token store
 
 Tokens are cached per `(issuer, client_id)` profile, addressed by a
 SHA-256 hash of the pair so those values don't leak into keys/filenames.
@@ -173,8 +173,9 @@ SHA-256 hash of the pair so those values don't leak into keys/filenames.
 | `auto` (default) | Try the OS keychain (macOS Keychain, Linux Secret Service over D-Bus) first; fall back to the plaintext file store only when the keychain backend is unavailable (no daemon reachable) — not on a plain cache miss. Logs a one-line notice to stderr the first time it falls back. |
 | `keychain` | OS keychain only, no fallback. Fails fast at startup if no keychain backend is reachable. |
 | `file` | Plaintext JSON file only — this CLI's original behavior, no cgo, works anywhere. |
+| `none` | Disables persistence entirely: nothing is read from or written to disk or the keychain, and every run performs a fresh login/exchange. `--token-store-dir` is ignored. |
 
-The file store lives at `--cache-dir` (default `$XDG_CACHE_HOME/oidc-token`
+The file store lives at `--token-store-dir` (default `$XDG_CACHE_HOME/oidc-token`
 or `~/.cache/oidc-token`); files are `0600`, written atomically, and
 refreshes run under an advisory `flock` so concurrent invocations converge
 on one winner instead of each re-authenticating. `auto` mode reuses that
@@ -265,7 +266,7 @@ export OIDC_TOKEN_CLIENT_ID=ci-client
 oidc-token --non-interactive
 ```
 
-Reuse the same `--cache-dir` between the bootstrap step and later
+Reuse the same `--token-store-dir` between the bootstrap step and later
 non-interactive runs — an ephemeral runner has no warm cache and will
 fail fast by design.
 

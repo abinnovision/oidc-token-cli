@@ -81,8 +81,8 @@ type Config struct {
 	Audience       string
 	GrantType      GrantType
 	TokenType      TokenType
-	CacheDir       string
-	TokenStore     cache.Backend // auto|keychain|file, see cache.Backend
+	TokenStoreDir  string
+	TokenStore     cache.Backend // auto|keychain|file|none, see cache.Backend
 	RedirectPort   int           // 0 = ephemeral loopback port (RFC 8252 default)
 	NonInteractive bool
 	All            bool // --all: print full JSON document instead of a bare token
@@ -133,7 +133,7 @@ type fileConfig struct {
 	Audience       *string `json:"audience"`
 	GrantType      *string `json:"grant_type"`
 	TokenType      *string `json:"token_type"`
-	CacheDir       *string `json:"cache_dir"`
+	TokenStoreDir  *string `json:"token_store_dir"`
 	TokenStore     *string `json:"token_store"`
 	RedirectPort   *int    `json:"redirect_port"`
 	NonInteractive *bool   `json:"non_interactive"`
@@ -167,7 +167,7 @@ func (e Env) get(key string) string {
 }
 
 var envKeys = struct {
-	issuer, clientID, scope, audience, grantType, tokenType, cacheDir, tokenStore, nonInteractive, logout       string
+	issuer, clientID, scope, audience, grantType, tokenType, tokenStoreDir, tokenStore, nonInteractive, logout  string
 	clientAuthMethod, clientSecret, privateKeyPath, privateKeyID, privateKeySigningAlg, clientAssertionAudience string
 	subjectToken, subjectTokenType                                                                              string
 }{
@@ -177,7 +177,7 @@ var envKeys = struct {
 	audience:       "OIDC_TOKEN_AUDIENCE",
 	grantType:      "OIDC_TOKEN_GRANT_TYPE",
 	tokenType:      "OIDC_TOKEN_TOKEN_TYPE",
-	cacheDir:       "OIDC_TOKEN_CACHE_DIR",
+	tokenStoreDir:  "OIDC_TOKEN_STORE_DIR",
 	tokenStore:     "OIDC_TOKEN_STORE",
 	nonInteractive: "OIDC_TOKEN_NON_INTERACTIVE",
 	logout:         "OIDC_TOKEN_LOGOUT",
@@ -208,19 +208,19 @@ func Parse(args []string, stderr io.Writer, env Env) (*Config, error) {
 	}
 
 	var (
-		configFile     = fs.String("config", "", "path to an optional JSON config file")
-		issuer         = fs.String("issuer", "", "OIDC issuer URL (discovery is fetched from <issuer>/.well-known/openid-configuration)")
-		clientID       = fs.String("client-id", "", "OAuth2/OIDC client ID")
-		scope          = fs.String("scope", DefaultScope, "space-separated OAuth2 scopes to request")
-		audience       = fs.String("audience", "", "expected audience (aud) claim; required whenever the relying party checks it")
-		grantType      = fs.String("grant-type", string(GrantAuto), "auto|authcode|device-code")
-		tokenType      = fs.String("token-type", string(TokenTypeAccessToken), "access_token|id_token")
-		cacheDirFlag   = fs.String("cache-dir", "", "override the token cache directory (default: $XDG_CACHE_HOME/oidc-token or ~/.cache/oidc-token)")
-		tokenStore     = fs.String("token-store", string(cache.BackendAuto), "auto|keychain|file: where cached tokens are stored")
-		redirectPort   = fs.Int("redirect", 0, "fixed loopback callback port for authcode; 0 selects an ephemeral port")
-		nonInteractive = fs.Bool("non-interactive", false, "fail fast instead of opening a browser or a device-code prompt")
-		all            = fs.Bool("all", false, "print a JSON document with every available credential field instead of a bare token")
-		logout         = fs.Bool("logout", false, "clear the cached entry for --issuer/--client-id and exit, without logging in or refreshing")
+		configFile        = fs.String("config", "", "path to an optional JSON config file")
+		issuer            = fs.String("issuer", "", "OIDC issuer URL (discovery is fetched from <issuer>/.well-known/openid-configuration)")
+		clientID          = fs.String("client-id", "", "OAuth2/OIDC client ID")
+		scope             = fs.String("scope", DefaultScope, "space-separated OAuth2 scopes to request")
+		audience          = fs.String("audience", "", "expected audience (aud) claim; required whenever the relying party checks it")
+		grantType         = fs.String("grant-type", string(GrantAuto), "auto|authcode|device-code")
+		tokenType         = fs.String("token-type", string(TokenTypeAccessToken), "access_token|id_token")
+		tokenStoreDirFlag = fs.String("token-store-dir", "", "override the token store directory used by the file backend (default: $XDG_CACHE_HOME/oidc-token or ~/.cache/oidc-token)")
+		tokenStore        = fs.String("token-store", string(cache.BackendAuto), "auto|keychain|file|none: where tokens are stored; none disables persistence entirely")
+		redirectPort      = fs.Int("redirect", 0, "fixed loopback callback port for authcode; 0 selects an ephemeral port")
+		nonInteractive    = fs.Bool("non-interactive", false, "fail fast instead of opening a browser or a device-code prompt")
+		all               = fs.Bool("all", false, "print a JSON document with every available credential field instead of a bare token")
+		logout            = fs.Bool("logout", false, "clear the cached entry for --issuer/--client-id and exit, without logging in or refreshing")
 
 		clientAuthMethod        = fs.String("client-auth-method", string(ClientAuthNone), "client authentication method for the token endpoint: \"\"|client_secret_basic|client_secret_post|private_key_jwt")
 		clientSecret            = fs.String("client-secret", "", "client secret for client_secret_basic/client_secret_post (prefer --client-secret-file or $"+envKeys.clientSecret+" over this flag)")
@@ -270,8 +270,8 @@ func Parse(args []string, stderr io.Writer, env Env) (*Config, error) {
 	if v := env.get(envKeys.tokenType); v != "" {
 		cfg.TokenType = TokenType(v)
 	}
-	if v := env.get(envKeys.cacheDir); v != "" {
-		cfg.CacheDir = v
+	if v := env.get(envKeys.tokenStoreDir); v != "" {
+		cfg.TokenStoreDir = v
 	}
 	if v := env.get(envKeys.tokenStore); v != "" {
 		cfg.TokenStore = cache.Backend(v)
@@ -338,8 +338,8 @@ func Parse(args []string, stderr io.Writer, env Env) (*Config, error) {
 	if explicit["token-type"] {
 		cfg.TokenType = TokenType(*tokenType)
 	}
-	if explicit["cache-dir"] {
-		cfg.CacheDir = *cacheDirFlag
+	if explicit["token-store-dir"] {
+		cfg.TokenStoreDir = *tokenStoreDirFlag
 	}
 	if explicit["token-store"] {
 		cfg.TokenStore = cache.Backend(*tokenStore)
@@ -409,12 +409,12 @@ func Parse(args []string, stderr io.Writer, env Env) (*Config, error) {
 		cfg.SubjectToken = strings.TrimRight(string(tok), "\n")
 	}
 
-	if cfg.CacheDir == "" {
+	if cfg.TokenStoreDir == "" && cfg.TokenStore != cache.BackendNone {
 		dir, err := cache.DefaultDir(env.get)
 		if err != nil {
 			return nil, fmt.Errorf("config: %w", err)
 		}
-		cfg.CacheDir = dir
+		cfg.TokenStoreDir = dir
 	}
 
 	if err := cfg.validate(); err != nil {
@@ -444,9 +444,9 @@ func (c *Config) validate() error {
 		return fmt.Errorf("config: invalid --token-type %q (want access_token|id_token)", c.TokenType)
 	}
 	switch c.TokenStore {
-	case cache.BackendAuto, cache.BackendKeychain, cache.BackendFile:
+	case cache.BackendAuto, cache.BackendKeychain, cache.BackendFile, cache.BackendNone:
 	default:
-		return fmt.Errorf("config: invalid --token-store %q (want auto|keychain|file)", c.TokenStore)
+		return fmt.Errorf("config: invalid --token-store %q (want auto|keychain|file|none)", c.TokenStore)
 	}
 	switch c.ClientAuthMethod {
 	case ClientAuthNone, ClientAuthSecretBasic, ClientAuthSecretPost, ClientAuthPrivateKeyJWT:
@@ -571,8 +571,8 @@ func applyFileConfig(cfg *Config, fc *fileConfig) {
 	if fc.TokenType != nil {
 		cfg.TokenType = TokenType(*fc.TokenType)
 	}
-	if fc.CacheDir != nil {
-		cfg.CacheDir = *fc.CacheDir
+	if fc.TokenStoreDir != nil {
+		cfg.TokenStoreDir = *fc.TokenStoreDir
 	}
 	if fc.TokenStore != nil {
 		cfg.TokenStore = cache.Backend(*fc.TokenStore)

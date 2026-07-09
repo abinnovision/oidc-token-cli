@@ -19,6 +19,10 @@ const (
 	// BackendFile enforces the plaintext file store exclusively, matching
 	// this CLI's original behavior.
 	BackendFile Backend = "file"
+	// BackendNone disables token persistence entirely: every run performs a
+	// fresh login/exchange, and nothing is read from or written to disk or
+	// the keychain.
+	BackendNone Backend = "none"
 )
 
 // ChainStore implements Store by trying an ordered list of backends. A

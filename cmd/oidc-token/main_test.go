@@ -56,7 +56,7 @@ func TestRun_Success_BareTokenExactBytes_EmptyStderr_ExitZero(t *testing.T) {
 
 	code := run([]string{
 		"--issuer=https://issuer.example", "--client-id=cid",
-		"--cache-dir=" + filepath.Join(dir, "cache"), "--token-store=file",
+		"--token-store-dir=" + filepath.Join(dir, "cache"), "--token-store=file",
 	}, &stdout, &stderr, func(cfg *config.Config) runner.TokenSource {
 		return fakeSource{loginResult: output.Result{AccessToken: "the-access-token", RefreshToken: "rt"}}
 	}, failTokenExchange(t))
@@ -72,13 +72,43 @@ func TestRun_Success_BareTokenExactBytes_EmptyStderr_ExitZero(t *testing.T) {
 	}
 }
 
+func TestRun_TokenStoreNone_NeverPersistsAcrossRuns(t *testing.T) {
+	dir := t.TempDir()
+	storeDir := filepath.Join(dir, "store")
+
+	newSource := func(cfg *config.Config) runner.TokenSource {
+		return fakeSource{loginResult: output.Result{AccessToken: "at", RefreshToken: "rt"}}
+	}
+
+	for i := 0; i < 2; i++ {
+		var stdout, stderr bytes.Buffer
+		code := run([]string{
+			"--issuer=https://issuer.example", "--client-id=cid",
+			"--token-store=none", "--token-store-dir=" + storeDir,
+		}, &stdout, &stderr, newSource, failTokenExchange(t))
+
+		if code != 0 {
+			t.Fatalf("run %d: exit code = %d, want 0 (stderr: %s)", i, code, stderr.String())
+		}
+		if got := stdout.String(); got != "at" {
+			t.Fatalf("run %d: stdout = %q, want fresh login result every time", i, got)
+		}
+	}
+
+	if entries, err := filepath.Glob(filepath.Join(storeDir, "*")); err != nil {
+		t.Fatalf("Glob: %v", err)
+	} else if len(entries) != 0 {
+		t.Fatalf("--token-store=none must not write to disk, found: %v", entries)
+	}
+}
+
 func TestRun_Success_All_ValidJSON(t *testing.T) {
 	dir := t.TempDir()
 	var stdout, stderr bytes.Buffer
 
 	code := run([]string{
 		"--issuer=https://issuer.example", "--client-id=cid", "--all",
-		"--cache-dir=" + filepath.Join(dir, "cache"), "--token-store=file",
+		"--token-store-dir=" + filepath.Join(dir, "cache"), "--token-store=file",
 	}, &stdout, &stderr, func(cfg *config.Config) runner.TokenSource {
 		return fakeSource{loginResult: output.Result{AccessToken: "at", IDToken: "it", RefreshToken: "rt"}}
 	}, failTokenExchange(t))
@@ -98,7 +128,7 @@ func TestRun_LoginFailure_ExitNonZero_EmptyStdout_NonEmptyStderr(t *testing.T) {
 
 	code := run([]string{
 		"--issuer=https://issuer.example", "--client-id=cid",
-		"--cache-dir=" + filepath.Join(dir, "cache"), "--token-store=file",
+		"--token-store-dir=" + filepath.Join(dir, "cache"), "--token-store=file",
 	}, &stdout, &stderr, func(cfg *config.Config) runner.TokenSource {
 		return fakeSource{loginErr: errors.New("mock issuer rejected login")}
 	}, failTokenExchange(t))
@@ -121,7 +151,7 @@ func TestRun_NoViableGrant_ExitNonZero_EmptyStdout(t *testing.T) {
 	diagnostic := "authflow: no viable login method: IdP offers [authorization_code]; browser: unavailable (no $DISPLAY/$WAYLAND_DISPLAY); terminal: unattended (--non-interactive)"
 	code := run([]string{
 		"--issuer=https://issuer.example", "--client-id=cid", "--non-interactive",
-		"--cache-dir=" + filepath.Join(dir, "cache"), "--token-store=file",
+		"--token-store-dir=" + filepath.Join(dir, "cache"), "--token-store=file",
 	}, &stdout, &stderr, func(cfg *config.Config) runner.TokenSource {
 		return fakeSource{loginErr: errors.New(diagnostic)}
 	}, failTokenExchange(t))
@@ -178,7 +208,7 @@ func TestRun_RequestedTokenTypeMissing_ExitNonZero_EmptyStdout(t *testing.T) {
 
 	code := run([]string{
 		"--issuer=https://issuer.example", "--client-id=cid", "--token-type=id_token",
-		"--cache-dir=" + filepath.Join(dir, "cache"), "--token-store=file",
+		"--token-store-dir=" + filepath.Join(dir, "cache"), "--token-store=file",
 	}, &stdout, &stderr, func(cfg *config.Config) runner.TokenSource {
 		return fakeSource{loginResult: output.Result{AccessToken: "at-only"}}
 	}, failTokenExchange(t))
@@ -193,7 +223,7 @@ func TestRun_RequestedTokenTypeMissing_ExitNonZero_EmptyStdout(t *testing.T) {
 
 func TestBuildStore_File(t *testing.T) {
 	var stderr bytes.Buffer
-	cfg := &config.Config{TokenStore: cache.BackendFile, CacheDir: t.TempDir()}
+	cfg := &config.Config{TokenStore: cache.BackendFile, TokenStoreDir: t.TempDir()}
 	store, err := buildStore(context.Background(), cfg, &stderr)
 	if err != nil {
 		t.Fatalf("buildStore: %v", err)
@@ -205,7 +235,7 @@ func TestBuildStore_File(t *testing.T) {
 
 func TestBuildStore_Auto(t *testing.T) {
 	var stderr bytes.Buffer
-	cfg := &config.Config{TokenStore: cache.BackendAuto, CacheDir: t.TempDir()}
+	cfg := &config.Config{TokenStore: cache.BackendAuto, TokenStoreDir: t.TempDir()}
 	store, err := buildStore(context.Background(), cfg, &stderr)
 	if err != nil {
 		t.Fatalf("buildStore: %v", err)
@@ -227,7 +257,7 @@ func TestRun_Logout_ClearsCacheEntry_ExitZero(t *testing.T) {
 	// Bootstrap a cached entry via a normal login.
 	code := run([]string{
 		"--issuer=https://issuer.example", "--client-id=cid",
-		"--token-store=file", "--cache-dir=" + cacheDir,
+		"--token-store=file", "--token-store-dir=" + cacheDir,
 	}, &stdout, &stderr, func(cfg *config.Config) runner.TokenSource {
 		return fakeSource{loginResult: output.Result{AccessToken: "at", RefreshToken: "rt"}}
 	}, failTokenExchange(t))
@@ -239,7 +269,7 @@ func TestRun_Logout_ClearsCacheEntry_ExitZero(t *testing.T) {
 	stderr.Reset()
 	code = run([]string{
 		"--issuer=https://issuer.example", "--client-id=cid",
-		"--token-store=file", "--cache-dir=" + cacheDir, "--logout",
+		"--token-store=file", "--token-store-dir=" + cacheDir, "--logout",
 	}, &stdout, &stderr, func(cfg *config.Config) runner.TokenSource {
 		t.Fatal("--logout must not construct a TokenSource")
 		return nil
@@ -257,7 +287,7 @@ func TestRun_Logout_ClearsCacheEntry_ExitZero(t *testing.T) {
 	loginCalled := false
 	code = run([]string{
 		"--issuer=https://issuer.example", "--client-id=cid",
-		"--token-store=file", "--cache-dir=" + cacheDir,
+		"--token-store=file", "--token-store-dir=" + cacheDir,
 	}, &stdout, &stderr, func(cfg *config.Config) runner.TokenSource {
 		loginCalled = true
 		return fakeSource{loginResult: output.Result{AccessToken: "at-2", RefreshToken: "rt-2"}}
@@ -314,7 +344,7 @@ func TestRun_TokenExchange_BypassesCacheAndStore(t *testing.T) {
 		"--subject-token=sub-tok",
 		// A cache dir under a path that doesn't exist: if token-exchange
 		// ever touched the store, buildStore/cache writes would fail loudly.
-		"--cache-dir=" + filepath.Join(dir, "does-not-exist", "cache"), "--token-store=file",
+		"--token-store-dir=" + filepath.Join(dir, "does-not-exist", "cache"), "--token-store=file",
 	}, &stdout, &stderr, newSource, newTokenExchange)
 
 	if code != 0 {
@@ -339,7 +369,7 @@ func TestRun_TokenExchange_All_ValidJSON(t *testing.T) {
 	code := run([]string{
 		"--issuer=https://issuer.example", "--client-id=cid", "--grant-type=token-exchange",
 		"--subject-token=sub-tok", "--all",
-		"--cache-dir=" + filepath.Join(dir, "cache"), "--token-store=file",
+		"--token-store-dir=" + filepath.Join(dir, "cache"), "--token-store=file",
 	}, &stdout, &stderr, func(cfg *config.Config) runner.TokenSource {
 		t.Fatal("must not construct a runner.TokenSource for --grant-type=token-exchange")
 		return nil
