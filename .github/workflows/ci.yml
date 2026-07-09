@@ -84,7 +84,7 @@ jobs:
         id: gtb
         env:
           GTB_URL: ${{ secrets.GTB_URL }}
-          GTB_AUDIENCE: gh-token-broker # must match the broker's configured oidc.audience
+          GTB_AUDIENCE: gtb-abinnovision # must match the broker's configured oidc.audience
         run: |
           set -euo pipefail
 
