@@ -77,7 +77,7 @@ func (r *Runner) Run(ctx context.Context) (output.Result, error) {
 
 	entry, ok, err := r.Cache.Load(ctx, issuer, clientID)
 	if err != nil {
-		return output.Result{}, fmt.Errorf("%w: %v", ErrCacheRead, err)
+		return output.Result{}, fmt.Errorf("%w: %w", ErrCacheRead, err)
 	}
 
 	if ok && r.entryValid(entry) {
@@ -135,7 +135,7 @@ func (r *Runner) tryRefresh(ctx context.Context, issuer, clientID string, staleE
 		defer cancel()
 		res, err := r.Source.Refresh(refreshCtx, refreshToken)
 		if err != nil {
-			outErr = fmt.Errorf("%w: %v", ErrRefreshFailed, err)
+			outErr = fmt.Errorf("%w: %w", ErrRefreshFailed, err)
 			return nil
 		}
 		if err := r.checkIDToken(res); err != nil {
@@ -147,7 +147,7 @@ func (r *Runner) tryRefresh(ctx context.Context, issuer, clientID string, staleE
 			res.RefreshToken = refreshToken
 		}
 		if err := r.persist(ctx, issuer, clientID, res); err != nil {
-			outErr = fmt.Errorf("%w: %v", ErrCacheWrite, err)
+			outErr = fmt.Errorf("%w: %w", ErrCacheWrite, err)
 			return nil
 		}
 		result = res
@@ -165,7 +165,7 @@ func (r *Runner) tryRefresh(ctx context.Context, issuer, clientID string, staleE
 func (r *Runner) login(ctx context.Context, issuer, clientID string) (output.Result, error) {
 	res, err := r.Source.Login(ctx)
 	if err != nil {
-		return output.Result{}, fmt.Errorf("%w: %v", ErrLoginFailed, err)
+		return output.Result{}, fmt.Errorf("%w: %w", ErrLoginFailed, err)
 	}
 	if err := r.checkIDToken(res); err != nil {
 		return output.Result{}, err
@@ -174,7 +174,7 @@ func (r *Runner) login(ctx context.Context, issuer, clientID string) (output.Res
 		fmt.Fprintln(r.Stderr, "warning: issuer did not return a refresh_token; silent refresh will not be possible for this profile")
 	}
 	if err := r.persist(ctx, issuer, clientID, res); err != nil {
-		return output.Result{}, fmt.Errorf("%w: %v", ErrCacheWrite, err)
+		return output.Result{}, fmt.Errorf("%w: %w", ErrCacheWrite, err)
 	}
 	return res, nil
 }
@@ -186,7 +186,7 @@ func (r *Runner) checkIDToken(res output.Result) error {
 		return nil
 	}
 	if r.Config.TokenType == config.TokenTypeIDToken {
-		return fmt.Errorf("%w: %v", ErrIDTokenInvalid, res.IDTokenError)
+		return fmt.Errorf("%w: %w", ErrIDTokenInvalid, res.IDTokenError)
 	}
 	if r.Stderr != nil {
 		fmt.Fprintf(r.Stderr, "warning: id_token verification failed (%v); continuing since --token-type=%s was requested\n", res.IDTokenError, r.Config.TokenType)

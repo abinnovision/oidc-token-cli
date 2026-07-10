@@ -71,7 +71,7 @@ const DefaultScope = "openid offline_access"
 
 // DefaultSubjectTokenType is used for RFC 8693 §3's subject_token_type when
 // --subject-token-type isn't set.
-const DefaultSubjectTokenType = "urn:ietf:params:oauth:token-type:access_token"
+const DefaultSubjectTokenType = "urn:ietf:params:oauth:token-type:access_token" //nolint:gosec // RFC 8693 token-type URN, not a credential
 
 // SubjectTokenSource selects how Config.SubjectToken is obtained.
 // SubjectTokenSourceManual (the default) means the caller supplies it
@@ -576,7 +576,7 @@ func (c *Config) resolvePrivateKey() error {
 }
 
 func loadFileConfig(path string) (*fileConfig, error) {
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) //nolint:gosec // path is a user-supplied CLI flag, the intended way to point this tool at a config file
 	if err != nil {
 		return nil, fmt.Errorf("config: read config file: %w", err)
 	}

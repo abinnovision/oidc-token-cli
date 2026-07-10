@@ -44,7 +44,7 @@ func (p *Provider) AuthCodeLogin(ctx context.Context, scope string, port int, op
 	}
 	ctx = withHTTPClient(ctx)
 
-	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", fmt.Sprintf("127.0.0.1:%d", port))
 	if err != nil {
 		return output.Result{}, fmt.Errorf("oidc: bind loopback callback listener: %w", err)
 	}

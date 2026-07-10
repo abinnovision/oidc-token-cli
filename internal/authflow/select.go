@@ -35,7 +35,7 @@ type Grant string
 const (
 	grantAuthorizationCode Grant = "authorization_code"
 	grantDeviceCodeURN     Grant = "urn:ietf:params:oauth:grant-type:device_code"
-	grantTokenExchangeURN  Grant = "urn:ietf:params:oauth:grant-type:token-exchange"
+	grantTokenExchangeURN  Grant = "urn:ietf:params:oauth:grant-type:token-exchange" //nolint:gosec // RFC 8693 grant-type URN, not a credential
 )
 
 // maxInteractiveAttempts bounds total interactive attempts across a single
