@@ -24,6 +24,17 @@ jobs:
       - run: go vet ./...
       - run: go test -race ./...
 
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.5.0
+
   e2e:
     # Real-IdP compliance/smoke tier against a dexidp/dex container via
     # testcontainers-go; kept as its own job (not folded into the test
@@ -42,7 +53,7 @@ jobs:
   release:
     # Tag + release only after the full test matrix is green, and only on
     # pushes to main (never on pull requests).
-    needs: [test, e2e]
+    needs: [test, lint, e2e]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:

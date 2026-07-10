@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"time"
 )
 
 // AuthorizationError is returned when the loopback callback receives an
@@ -67,7 +68,7 @@ func awaitCallback(ctx context.Context, ln net.Listener, expectedState string) (
 		}
 	})
 
-	srv := &http.Server{Handler: mux}
+	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go func() { _ = srv.Serve(ln) }()
 
 	select {

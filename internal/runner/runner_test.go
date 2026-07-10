@@ -187,7 +187,7 @@ func TestRun_RefreshFails_FallsBackToLogin(t *testing.T) {
 func TestRun_NonInteractive_DelegatesLoginDecisionToSource(t *testing.T) {
 	// The Runner delegates the --non-interactive viability decision to the
 	// TokenSource; a negotiation failure wraps as ErrLoginFailed.
-	src := &fakeSource{loginErr: errors.New("authflow: no viable login method: ...")}
+	src := &fakeSource{loginErr: errors.New("authflow: no viable login method")}
 	cfg := &config.Config{Issuer: "https://issuer.example", ClientID: "cid", NonInteractive: true}
 	r := newRunner(t, src, cfg, nil)
 

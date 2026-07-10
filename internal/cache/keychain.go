@@ -54,10 +54,7 @@ func isUnavailable(err error) bool {
 		return true
 	}
 	var execErr *exec.Error
-	if errors.As(err, &execErr) {
-		return true
-	}
-	return false
+	return errors.As(err, &execErr)
 }
 
 // Probe performs a lightweight round-trip to check whether the keychain
@@ -71,12 +68,12 @@ func (k *KeychainStore) Probe(ctx context.Context) error {
 		return nil
 	}
 	if isUnavailable(err) {
-		return fmt.Errorf("%w: %v", ErrBackendUnavailable, err)
+		return fmt.Errorf("%w: %w", ErrBackendUnavailable, err)
 	}
 	// Any other error (e.g. a transient failure) is still treated as
 	// unavailable for probing purposes: the caller only wants to know
 	// whether it's safe to rely on this backend.
-	return fmt.Errorf("%w: %v", ErrBackendUnavailable, err)
+	return fmt.Errorf("%w: %w", ErrBackendUnavailable, err)
 }
 
 func (k *KeychainStore) Load(ctx context.Context, issuer, clientID string) (Entry, bool, error) {
@@ -88,7 +85,7 @@ func (k *KeychainStore) Load(ctx context.Context, issuer, clientID string) (Entr
 			return Entry{}, false, nil
 		}
 		if isUnavailable(err) {
-			return Entry{}, false, fmt.Errorf("%w: %v", ErrBackendUnavailable, err)
+			return Entry{}, false, fmt.Errorf("%w: %w", ErrBackendUnavailable, err)
 		}
 		return Entry{}, false, fmt.Errorf("cache: keychain read: %w", err)
 	}
@@ -110,7 +107,7 @@ func (k *KeychainStore) Save(ctx context.Context, e Entry) error {
 	})
 	if err != nil {
 		if isUnavailable(err) {
-			return fmt.Errorf("%w: %v", ErrBackendUnavailable, err)
+			return fmt.Errorf("%w: %w", ErrBackendUnavailable, err)
 		}
 		return fmt.Errorf("cache: keychain write: %w", err)
 	}
@@ -126,7 +123,7 @@ func (k *KeychainStore) Delete(ctx context.Context, issuer, clientID string) err
 			return nil
 		}
 		if isUnavailable(err) {
-			return fmt.Errorf("%w: %v", ErrBackendUnavailable, err)
+			return fmt.Errorf("%w: %w", ErrBackendUnavailable, err)
 		}
 		return fmt.Errorf("cache: keychain delete: %w", err)
 	}

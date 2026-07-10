@@ -92,6 +92,9 @@ func (p *Provider) postTokenRequest(ctx context.Context, tokenURL string, v url.
 		}
 		v.Set("client_assertion_type", clientAssertionType)
 		v.Set("client_assertion", assertion)
+	default:
+		// ClientAuthNone (public client) needs no body params; client_secret_basic
+		// is applied to the Authorization header below instead.
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(v.Encode()))

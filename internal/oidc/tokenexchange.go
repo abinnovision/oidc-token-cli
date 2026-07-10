@@ -9,7 +9,7 @@ import (
 )
 
 // tokenExchangeGrantType is RFC 8693 §2.1's grant_type value.
-const tokenExchangeGrantType = "urn:ietf:params:oauth:grant-type:token-exchange"
+const tokenExchangeGrantType = "urn:ietf:params:oauth:grant-type:token-exchange" //nolint:gosec // RFC 8693 grant-type URN, not a credential
 
 // TokenExchange performs an RFC 8693 token exchange: subjectToken (of type
 // subjectTokenType) is exchanged for a new token set. It performs no

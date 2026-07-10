@@ -78,7 +78,7 @@ func (c *Cache) ensureDir() error {
 	if err := os.MkdirAll(c.Dir, 0o700); err != nil {
 		return fmt.Errorf("cache: create dir: %w", err)
 	}
-	if err := os.Chmod(c.Dir, 0o700); err != nil {
+	if err := os.Chmod(c.Dir, 0o700); err != nil { //nolint:gosec // 0700 on a directory needs the execute bit for traversal; not a file-permission issue
 		return fmt.Errorf("cache: chmod dir: %w", err)
 	}
 	return nil
@@ -159,12 +159,12 @@ func (c *Cache) WithLock(ctx context.Context, issuer, clientID string, fn func()
 	fl := flock.New(c.lockPath(issuer, clientID))
 	locked, err := fl.TryLockContext(lockCtx, lockRetryDelay)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrLockTimeout, err)
+		return fmt.Errorf("%w: %w", ErrLockTimeout, err)
 	}
 	if !locked {
 		return ErrLockTimeout
 	}
-	defer fl.Unlock()
+	defer func() { _ = fl.Unlock() }()
 	return fn()
 }
 

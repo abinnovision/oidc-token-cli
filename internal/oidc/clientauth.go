@@ -70,6 +70,10 @@ func (p *Provider) applyClientAuth(cfg *oauth2.Config) {
 	case ClientAuthSecretPost:
 		cfg.ClientSecret = p.clientAuth.secret
 		cfg.Endpoint.AuthStyle = oauth2.AuthStyleInParams
+	default:
+		// ClientAuthNone (public client) and ClientAuthPrivateKeyJWT need no
+		// oauth2.Config field; the latter is handled via
+		// clientAssertionOptions instead.
 	}
 }
 
