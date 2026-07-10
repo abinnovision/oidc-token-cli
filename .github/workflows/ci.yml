@@ -90,29 +90,30 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag -a "$NEXT" -m "$NEXT"
           git push origin "refs/tags/$NEXT"
+      - name: Install oidc-token-cli
+        if: steps.svu.outputs.release == 'true'
+        uses: jaxxstorm/action-install-gh-release@v3
+        with:
+          repo: abinnovision/oidc-token-cli
+          cache: enable
       - name: Fetch homebrew-tap token from gh-token-broker
         if: steps.svu.outputs.release == 'true'
         id: gtb
         env:
-          GTB_URL: ${{ secrets.GTB_URL }}
-          GTB_AUDIENCE: gtb-abinnovision # must match the broker's configured oidc.audience
+          GTB_URL: ${{ secrets.GTB_URL }} # OIDC issuer base; exposes /.well-known/openid-configuration
         run: |
           set -euo pipefail
 
-          id_token_response=$(curl -sf \
-            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
-            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${GTB_AUDIENCE}")
-          id_token=$(echo "${id_token_response}" | jq -r ".value")
+          token=$(oidc-token \
+            --issuer "${GTB_URL}" \
+            --client-id gtb-abinnovision \
+            --grant-type token-exchange \
+            --subject-token-source github-actions \
+            --audience gtb-abinnovision \
+            --resource abinnovision/homebrew-tap \
+            --non-interactive)
 
-          response=$(curl -sf \
-            --header "Content-Type: application/json" \
-            --request POST \
-            --header "Authorization: Bearer ${id_token}" \
-            --data '{"repositories":["abinnovision/homebrew-tap"],"permissions":{"contents":"write"}}' \
-            "${GTB_URL}/token")
-
-          token=$(echo "${response}" | jq -r ".token")
-          if [ -z "${token}" ] || [ "${token}" = "null" ]; then
+          if [ -z "${token}" ]; then
             echo "gh-token-broker returned no token" >&2
             exit 1
           fi

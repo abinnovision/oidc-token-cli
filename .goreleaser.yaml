@@ -39,7 +39,8 @@ homebrew_casks:
       name: homebrew-tap
       # The primary GITHUB_TOKEN passed to goreleaser only has write access
       # to this repo. Push credential is a short-lived, least-privilege
-      # token minted per-release by gh-token-broker (scoped only to
+      # token minted per-release via oidc-token-cli's own token-exchange
+      # grant against gh-token-broker's RFC 8693 endpoint (scoped only to
       # abinnovision/homebrew-tap, contents:write) — see ci.yml's
       # "Fetch homebrew-tap token from gh-token-broker" step. Not a stored PAT.
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
