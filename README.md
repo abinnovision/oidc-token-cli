@@ -317,7 +317,8 @@ derives the next semver from conventional commits and, on a version bump,
 `goreleaser release --clean` builds darwin/linux × amd64/arm64 archives
 plus a GitHub release and a Homebrew formula update in
 [`abinnovision/homebrew-tap`](https://github.com/abinnovision/homebrew-tap)
-(push token minted per-release by gh-token-broker, not a stored PAT).
+(push token minted per-release by running `oidc-token-cli` itself against
+gh-token-broker's token-exchange endpoint, not a stored PAT).
 `.goreleaser.yaml` intentionally uses the `brews` key (not
 `homebrew_casks` — casks get Gatekeeper-quarantined on an unsigned binary);
 `goreleaser check` will report a `brews` deprecation warning, which is
