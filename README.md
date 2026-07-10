@@ -53,6 +53,7 @@ oidc-token \
   [--private-key-file FILE] [--private-key-id KID] [--private-key-alg ALG] \
   [--client-assertion-audience AUD] \
   [--subject-token TOKEN | --subject-token-file FILE] [--subject-token-type TYPE] \
+  [--subject-token-source github-actions] \
   [--requested-token-type TYPE] [--resource URI ...]
 ```
 
@@ -78,6 +79,7 @@ oidc-token \
 | `--private-key-alg` | `RS256` | JWS signing algorithm: `RS256`/`RS384`/`RS512`/`PS256`/`PS384`/`PS512`/`ES256`/`ES384`/`ES512`. |
 | `--client-assertion-audience` | *(the discovered token endpoint)* | Override the assertion's `aud` claim, for issuers that expect the issuer URL or something else instead. |
 | `--subject-token` / `--subject-token-file` | *(none)* | RFC 8693 `subject_token` for `--grant-type=token-exchange`. Prefer `--subject-token-file` or `$OIDC_TOKEN_SUBJECT_TOKEN` over the bare flag; `--subject-token-file` wins if both are set. |
+| `--subject-token-source` | *(empty, manual)* | `github-actions`: auto-fetch `--subject-token` from GitHub Actions' native OIDC provider instead of supplying it manually. Mutually exclusive with `--subject-token`/`--subject-token-file`/`$OIDC_TOKEN_SUBJECT_TOKEN`; requires `--grant-type=token-exchange`. See [Subject token sources](#subject-token-sources). |
 | `--subject-token-type` | `urn:ietf:params:oauth:token-type:access_token` | RFC 8693 `subject_token_type`. |
 | `--requested-token-type` | *(none)* | RFC 8693 `requested_token_type`; omitted from the request entirely when unset. |
 | `--resource` | *(none)* | RFC 8693 `resource` target URI; repeatable for multiple resource params. |
@@ -90,7 +92,8 @@ Every flag except `--config`/`--client-secret-file`/`--subject-token-file`/
 `OIDC_TOKEN_CLIENT_AUTH_METHOD`, `OIDC_TOKEN_CLIENT_SECRET`,
 `OIDC_TOKEN_PRIVATE_KEY_FILE`, `OIDC_TOKEN_PRIVATE_KEY_ID`,
 `OIDC_TOKEN_PRIVATE_KEY_ALG`, `OIDC_TOKEN_CLIENT_ASSERTION_AUDIENCE`,
-`OIDC_TOKEN_SUBJECT_TOKEN`, `OIDC_TOKEN_SUBJECT_TOKEN_TYPE`.
+`OIDC_TOKEN_SUBJECT_TOKEN`, `OIDC_TOKEN_SUBJECT_TOKEN_TYPE`,
+`OIDC_TOKEN_SUBJECT_TOKEN_SOURCE`.
 `OIDC_TOKEN_CLIENT_SECRET` (or `--client-secret-file`) is the recommended
 way to pass a secret — avoid `--client-secret` on the command line where it
 can land in shell history or process listings. Precedence: defaults < env <
@@ -161,6 +164,36 @@ the wrong one.
   in a single request.
 - With `--all`, the response's `issued_token_type` (RFC 8693 §2.2.1) is
   included in the JSON document.
+
+#### Subject token sources
+
+By default `--subject-token` must be supplied manually. Setting
+`--subject-token-source=github-actions` instead fetches it automatically
+from GitHub Actions' native OIDC provider — the same
+`ACTIONS_ID_TOKEN_REQUEST_URL`/`ACTIONS_ID_TOKEN_REQUEST_TOKEN` mechanism
+GitHub injects into any job with `permissions: id-token: write`. This is
+mutually exclusive with `--subject-token`/`--subject-token-file`/
+`$OIDC_TOKEN_SUBJECT_TOKEN` and only valid with
+`--grant-type=token-exchange`.
+
+```sh
+oidc-token \
+  --issuer https://id.example.com/ \
+  --client-id my-token-exchange-client \
+  --grant-type token-exchange \
+  --subject-token-source github-actions \
+  --audience gtb-abinnovision
+```
+
+`--audience` doubles as the GitHub Actions `audience` query parameter for
+the fetched ID token (matching how GitHub Actions' `audience` and the
+eventual token-exchange `audience` are typically the same value in
+practice).
+
+This flag only supplies the *subject token* — it does not make the token
+endpoint RFC 8693-compliant. The receiving IdP/broker must still implement
+RFC 8693 §2.1 token exchange for the full flow to work; this flag has no
+effect on that.
 
 ### Token store
 

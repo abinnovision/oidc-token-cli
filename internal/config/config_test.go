@@ -538,3 +538,99 @@ func TestParse_SubjectTokenWithoutGrantType_Errors(t *testing.T) {
 		t.Fatal("expected error when --subject-token is set without --grant-type=token-exchange")
 	}
 }
+
+func TestParse_SubjectTokenSource_GitHubActions_Succeeds(t *testing.T) {
+	var stderr bytes.Buffer
+	cfg, err := Parse([]string{
+		"--issuer=https://issuer.example", "--client-id=cid", "--grant-type=token-exchange",
+		"--subject-token-source=github-actions",
+	}, &stderr, Env{Getenv: noEnv})
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.SubjectTokenSource != SubjectTokenSourceGitHubActions {
+		t.Errorf("SubjectTokenSource = %q, want github-actions", cfg.SubjectTokenSource)
+	}
+	if cfg.SubjectToken != "" {
+		t.Errorf("SubjectToken = %q, want empty when resolved via --subject-token-source", cfg.SubjectToken)
+	}
+}
+
+func TestParse_SubjectTokenSource_MutuallyExclusiveWithSubjectToken(t *testing.T) {
+	var stderr bytes.Buffer
+	_, err := Parse([]string{
+		"--issuer=https://issuer.example", "--client-id=cid", "--grant-type=token-exchange",
+		"--subject-token-source=github-actions", "--subject-token=sub-tok",
+	}, &stderr, Env{Getenv: noEnv})
+	if err == nil {
+		t.Fatal("expected error when --subject-token-source and --subject-token are both set")
+	}
+}
+
+func TestParse_SubjectTokenSource_MutuallyExclusiveWithEnvSubjectToken(t *testing.T) {
+	env := envFrom(map[string]string{"OIDC_TOKEN_SUBJECT_TOKEN": "env-subject-token"})
+	var stderr bytes.Buffer
+	_, err := Parse([]string{
+		"--issuer=https://issuer.example", "--client-id=cid", "--grant-type=token-exchange",
+		"--subject-token-source=github-actions",
+	}, &stderr, Env{Getenv: env})
+	if err == nil {
+		t.Fatal("expected error when --subject-token-source is set and $OIDC_TOKEN_SUBJECT_TOKEN is also set")
+	}
+}
+
+func TestParse_SubjectTokenSource_RequiresTokenExchangeGrant(t *testing.T) {
+	var stderr bytes.Buffer
+	_, err := Parse([]string{
+		"--issuer=https://issuer.example", "--client-id=cid", "--grant-type=auto",
+		"--subject-token-source=github-actions",
+	}, &stderr, Env{Getenv: noEnv})
+	if err == nil {
+		t.Fatal("expected error when --subject-token-source is set without --grant-type=token-exchange")
+	}
+}
+
+func TestParse_SubjectTokenSource_UnknownValue_Errors(t *testing.T) {
+	var stderr bytes.Buffer
+	_, err := Parse([]string{
+		"--issuer=https://issuer.example", "--client-id=cid", "--grant-type=token-exchange",
+		"--subject-token-source=gitlab-ci",
+	}, &stderr, Env{Getenv: noEnv})
+	if err == nil {
+		t.Fatal("expected error for an unknown --subject-token-source value")
+	}
+}
+
+func TestParse_SubjectTokenSource_EnvVar(t *testing.T) {
+	env := envFrom(map[string]string{"OIDC_TOKEN_SUBJECT_TOKEN_SOURCE": "github-actions"})
+	var stderr bytes.Buffer
+	cfg, err := Parse([]string{
+		"--issuer=https://issuer.example", "--client-id=cid", "--grant-type=token-exchange",
+	}, &stderr, Env{Getenv: env})
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.SubjectTokenSource != SubjectTokenSourceGitHubActions {
+		t.Errorf("SubjectTokenSource = %q, want env override", cfg.SubjectTokenSource)
+	}
+}
+
+func TestParse_SubjectTokenSource_FileConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	body, _ := json.Marshal(map[string]any{"subject_token_source": "github-actions"})
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	cfg, err := Parse([]string{
+		"--issuer=https://issuer.example", "--client-id=cid", "--grant-type=token-exchange",
+		"--config=" + path,
+	}, &stderr, Env{Getenv: noEnv})
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.SubjectTokenSource != SubjectTokenSourceGitHubActions {
+		t.Errorf("SubjectTokenSource = %q, want file config value", cfg.SubjectTokenSource)
+	}
+}

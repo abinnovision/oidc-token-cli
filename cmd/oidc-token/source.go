@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"os"
 
 	"github.com/abinnovision/oidc-token-cli/internal/authflow"
 	"github.com/abinnovision/oidc-token-cli/internal/config"
 	"github.com/abinnovision/oidc-token-cli/internal/oidc"
 	"github.com/abinnovision/oidc-token-cli/internal/runner"
+	"github.com/abinnovision/oidc-token-cli/internal/subjecttoken"
 )
 
 // newRealSource wires the real network-facing TokenSource: runtime OIDC
@@ -50,5 +53,19 @@ func newRealTokenExchangeSource(cfg *config.Config) tokenExchanger {
 		PrivateKeyID:            cfg.PrivateKeyID,
 		PrivateKeySigningAlg:    cfg.SigningAlg(),
 		ClientAssertionAudience: cfg.ClientAssertionAudience,
+	}
+}
+
+// resolveRealSubjectToken resolves cfg's effective subject_token when
+// --subject-token-source is set to something other than manual. Currently
+// only github-actions is supported; config.validate() already rejects any
+// other value, so the default case below is unreachable in practice but
+// kept as a defensive fail-fast rather than a silent empty string.
+func resolveRealSubjectToken(ctx context.Context, cfg *config.Config) (string, error) {
+	switch cfg.SubjectTokenSource {
+	case config.SubjectTokenSourceGitHubActions:
+		return subjecttoken.FetchGitHubActions(ctx, os.Getenv, cfg.Audience, nil)
+	default:
+		return "", fmt.Errorf("cmd: unsupported --subject-token-source %q", cfg.SubjectTokenSource)
 	}
 }
