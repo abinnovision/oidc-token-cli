@@ -73,6 +73,20 @@ const DefaultScope = "openid offline_access"
 // --subject-token-type isn't set.
 const DefaultSubjectTokenType = "urn:ietf:params:oauth:token-type:access_token"
 
+// SubjectTokenSource selects how Config.SubjectToken is obtained.
+// SubjectTokenSourceManual (the default) means the caller supplies it
+// directly via --subject-token/--subject-token-file/$OIDC_TOKEN_SUBJECT_TOKEN.
+// A non-manual value means SubjectToken is intentionally left empty by
+// Parse; the caller resolves it from the selected ambient source before
+// making the token-exchange request, since Parse/validate must stay free
+// of network I/O.
+type SubjectTokenSource string
+
+const (
+	SubjectTokenSourceManual        SubjectTokenSource = ""
+	SubjectTokenSourceGitHubActions SubjectTokenSource = "github-actions"
+)
+
 // Config is the fully resolved set of identity/client + behavior knobs.
 type Config struct {
 	Issuer         string
@@ -122,6 +136,10 @@ type Config struct {
 	RequestedTokenType string
 	// Resources are RFC 8693 §2.1's optional, repeatable resource params.
 	Resources []string
+
+	// SubjectTokenSource selects how SubjectToken is obtained; see
+	// SubjectTokenSource's doc comment.
+	SubjectTokenSource SubjectTokenSource
 }
 
 // fileConfig mirrors Config's JSON-file representation. Every field is a
@@ -151,6 +169,7 @@ type fileConfig struct {
 	SubjectTokenType   *string  `json:"subject_token_type"`
 	RequestedTokenType *string  `json:"requested_token_type"`
 	Resources          []string `json:"resource"`
+	SubjectTokenSource *string  `json:"subject_token_source"`
 }
 
 // Env is the subset of the process environment config.Parse reads from,
@@ -169,7 +188,7 @@ func (e Env) get(key string) string {
 var envKeys = struct {
 	issuer, clientID, scope, audience, grantType, tokenType, tokenStoreDir, tokenStore, nonInteractive, logout  string
 	clientAuthMethod, clientSecret, privateKeyPath, privateKeyID, privateKeySigningAlg, clientAssertionAudience string
-	subjectToken, subjectTokenType                                                                              string
+	subjectToken, subjectTokenType, subjectTokenSource                                                          string
 }{
 	issuer:         "OIDC_TOKEN_ISSUER",
 	clientID:       "OIDC_TOKEN_CLIENT_ID",
@@ -189,8 +208,9 @@ var envKeys = struct {
 	privateKeySigningAlg:    "OIDC_TOKEN_PRIVATE_KEY_ALG",
 	clientAssertionAudience: "OIDC_TOKEN_CLIENT_ASSERTION_AUDIENCE",
 
-	subjectToken:     "OIDC_TOKEN_SUBJECT_TOKEN",
-	subjectTokenType: "OIDC_TOKEN_SUBJECT_TOKEN_TYPE",
+	subjectToken:       "OIDC_TOKEN_SUBJECT_TOKEN",
+	subjectTokenType:   "OIDC_TOKEN_SUBJECT_TOKEN_TYPE",
+	subjectTokenSource: "OIDC_TOKEN_SUBJECT_TOKEN_SOURCE",
 }
 
 // Parse builds a Config from, in ascending priority: defaults, environment
@@ -234,6 +254,7 @@ func Parse(args []string, stderr io.Writer, env Env) (*Config, error) {
 		subjectTokenFile   = fs.String("subject-token-file", "", "path to a file containing the subject_token (trailing newline trimmed); takes precedence over --subject-token")
 		subjectTokenType   = fs.String("subject-token-type", DefaultSubjectTokenType, "subject_token_type per RFC 8693 §3 (--grant-type=token-exchange)")
 		requestedTokenType = fs.String("requested-token-type", "", "optional requested_token_type per RFC 8693 §2.1 (--grant-type=token-exchange); omitted from the request entirely when unset")
+		subjectTokenSource = fs.String("subject-token-source", string(SubjectTokenSourceManual), "auto-fetch subject_token from an external source instead of --subject-token: \"\" (manual, default) | github-actions (--grant-type=token-exchange only); mutually exclusive with --subject-token/--subject-token-file/$"+envKeys.subjectToken)
 		resources          stringSliceFlag
 	)
 	fs.Var(&resources, "resource", "target resource URI for RFC 8693 token exchange (--grant-type=token-exchange); repeatable for multiple resource params")
@@ -305,6 +326,9 @@ func Parse(args []string, stderr io.Writer, env Env) (*Config, error) {
 	}
 	if v := env.get(envKeys.subjectTokenType); v != "" {
 		cfg.SubjectTokenType = v
+	}
+	if v := env.get(envKeys.subjectTokenSource); v != "" {
+		cfg.SubjectTokenSource = SubjectTokenSource(v)
 	}
 
 	// 2. Config file.
@@ -385,6 +409,9 @@ func Parse(args []string, stderr io.Writer, env Env) (*Config, error) {
 	}
 	if explicit["resource"] {
 		cfg.Resources = []string(resources)
+	}
+	if explicit["subject-token-source"] {
+		cfg.SubjectTokenSource = SubjectTokenSource(*subjectTokenSource)
 	}
 
 	// --client-secret-file always takes precedence over --client-secret /
@@ -470,15 +497,23 @@ func (c *Config) validate() error {
 			return fmt.Errorf("config: --client-secret/--private-key-file require --client-auth-method to be set")
 		}
 	}
+	switch c.SubjectTokenSource {
+	case SubjectTokenSourceManual, SubjectTokenSourceGitHubActions:
+	default:
+		return fmt.Errorf("config: invalid --subject-token-source %q (want \"\"|github-actions)", c.SubjectTokenSource)
+	}
 	if c.GrantType == GrantTokenExchange {
-		if c.SubjectToken == "" {
-			return fmt.Errorf("config: --grant-type=token-exchange requires --subject-token, --subject-token-file, or $%s", envKeys.subjectToken)
+		if c.SubjectTokenSource != SubjectTokenSourceManual && c.SubjectToken != "" {
+			return fmt.Errorf("config: --subject-token-source is mutually exclusive with --subject-token/--subject-token-file/$%s", envKeys.subjectToken)
+		}
+		if c.SubjectTokenSource == SubjectTokenSourceManual && c.SubjectToken == "" {
+			return fmt.Errorf("config: --grant-type=token-exchange requires --subject-token, --subject-token-file, $%s, or --subject-token-source", envKeys.subjectToken)
 		}
 		if c.SubjectTokenType == "" {
 			return fmt.Errorf("config: --subject-token-type must not be empty")
 		}
-	} else if c.SubjectToken != "" || c.RequestedTokenType != "" || len(c.Resources) > 0 {
-		return fmt.Errorf("config: --subject-token/--resource/--requested-token-type require --grant-type=token-exchange")
+	} else if c.SubjectToken != "" || c.RequestedTokenType != "" || len(c.Resources) > 0 || c.SubjectTokenSource != SubjectTokenSourceManual {
+		return fmt.Errorf("config: --subject-token/--subject-token-source/--resource/--requested-token-type require --grant-type=token-exchange")
 	}
 	return nil
 }
@@ -618,5 +653,8 @@ func applyFileConfig(cfg *Config, fc *fileConfig) {
 	}
 	if len(fc.Resources) > 0 {
 		cfg.Resources = fc.Resources
+	}
+	if fc.SubjectTokenSource != nil {
+		cfg.SubjectTokenSource = SubjectTokenSource(*fc.SubjectTokenSource)
 	}
 }
