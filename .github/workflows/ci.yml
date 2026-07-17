@@ -72,7 +72,7 @@ jobs:
       versions: ${{ steps.rp.outputs.versions }}
     steps:
       - name: Install oidc-token-cli
-        uses: jaxxstorm/action-install-gh-release@v3
+        uses: jaxxstorm/action-install-gh-release@v3.0.0
         with:
           repo: abinnovision/oidc-token-cli
           cache: enable
@@ -125,7 +125,7 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Install oidc-token-cli
-        uses: jaxxstorm/action-install-gh-release@v3
+        uses: jaxxstorm/action-install-gh-release@v3.0.0
         with:
           repo: abinnovision/oidc-token-cli
           cache: enable
