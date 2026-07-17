@@ -88,7 +88,6 @@ jobs:
             --client-id gtb-abinnovision \
             --grant-type token-exchange \
             --subject-token-source github-actions \
-            --subject-token-type urn:ietf:params:oauth:token-type:id_token \
             --audience gtb-abinnovision \
             --resource abinnovision/oidc-token-cli \
             --scope "contents:write issues:write pull_requests:write" \
@@ -142,7 +141,6 @@ jobs:
             --client-id gtb-abinnovision \
             --grant-type token-exchange \
             --subject-token-source github-actions \
-            --subject-token-type urn:ietf:params:oauth:token-type:id_token \
             --audience gtb-abinnovision \
             --resource abinnovision/homebrew-tap \
             --non-interactive)

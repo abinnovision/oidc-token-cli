@@ -80,7 +80,7 @@ oidc-token \
 | `--client-assertion-audience` | *(the discovered token endpoint)* | Override the assertion's `aud` claim, for issuers that expect the issuer URL or something else instead. |
 | `--subject-token` / `--subject-token-file` | *(none)* | RFC 8693 `subject_token` for `--grant-type=token-exchange`. Prefer `--subject-token-file` or `$OIDC_TOKEN_SUBJECT_TOKEN` over the bare flag; `--subject-token-file` wins if both are set. |
 | `--subject-token-source` | *(empty, manual)* | `github-actions`: auto-fetch `--subject-token` from GitHub Actions' native OIDC provider instead of supplying it manually. Mutually exclusive with `--subject-token`/`--subject-token-file`/`$OIDC_TOKEN_SUBJECT_TOKEN`; requires `--grant-type=token-exchange`. See [Subject token sources](#subject-token-sources). |
-| `--subject-token-type` | `urn:ietf:params:oauth:token-type:access_token` | RFC 8693 `subject_token_type`. |
+| `--subject-token-type` | `urn:ietf:params:oauth:token-type:access_token` (or `…:id_token` when `--subject-token-source=github-actions`) | RFC 8693 `subject_token_type`. |
 | `--requested-token-type` | *(none)* | RFC 8693 `requested_token_type`; omitted from the request entirely when unset. |
 | `--resource` | *(none)* | RFC 8693 `resource` target URI; repeatable for multiple resource params. |
 
@@ -155,9 +155,10 @@ key can't distinguish between exchanges for different `--audience`/
 the wrong one.
 
 - `--subject-token-type` defaults to
-  `urn:ietf:params:oauth:token-type:access_token`; override it per RFC 8693
-  §3 (e.g. `...:id_token`, `...:jwt`) to match what `--subject-token`
-  actually is.
+  `urn:ietf:params:oauth:token-type:access_token`, or to `...:id_token` when
+  `--subject-token-source=github-actions` (that endpoint issues an ID token).
+  Override it per RFC 8693 §3 (e.g. `...:id_token`, `...:jwt`) to match what
+  `--subject-token` actually is.
 - `--requested-token-type` is optional and omitted from the request
   entirely when unset.
 - `--resource` may be repeated to send multiple RFC 8693 `resource` params
@@ -184,6 +185,10 @@ oidc-token \
   --subject-token-source github-actions \
   --audience gtb-abinnovision
 ```
+
+Because this source fetches an ID token, `--subject-token-type` defaults to
+`urn:ietf:params:oauth:token-type:id_token` here (rather than the usual
+`...:access_token`), so it doesn't need to be set explicitly.
 
 `--audience` doubles as the GitHub Actions `audience` query parameter for
 the fetched ID token (matching how GitHub Actions' `audience` and the
