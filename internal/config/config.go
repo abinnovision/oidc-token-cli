@@ -70,8 +70,14 @@ var validSigningAlgs = map[string]jose.SignatureAlgorithm{
 const DefaultScope = "openid offline_access"
 
 // DefaultSubjectTokenType is used for RFC 8693 §3's subject_token_type when
-// --subject-token-type isn't set.
+// --subject-token-type isn't set and no source-specific default applies.
 const DefaultSubjectTokenType = "urn:ietf:params:oauth:token-type:access_token" //nolint:gosec // RFC 8693 token-type URN, not a credential
+
+// DefaultSubjectTokenTypeGitHubActions is the subject_token_type default when
+// --subject-token-source=github-actions and --subject-token-type isn't set.
+// The GitHub Actions OIDC endpoint issues an ID token, so the RFC 8693 type
+// must be id_token rather than the generic access_token default.
+const DefaultSubjectTokenTypeGitHubActions = "urn:ietf:params:oauth:token-type:id_token" //nolint:gosec // RFC 8693 token-type URN, not a credential
 
 // SubjectTokenSource selects how Config.SubjectToken is obtained.
 // SubjectTokenSourceManual (the default) means the caller supplies it
@@ -129,7 +135,8 @@ type Config struct {
 	// GrantType == GrantTokenExchange.
 	SubjectToken string
 	// SubjectTokenType is RFC 8693 §3's subject_token_type; defaults to
-	// DefaultSubjectTokenType.
+	// DefaultSubjectTokenType, or DefaultSubjectTokenTypeGitHubActions when
+	// SubjectTokenSource is SubjectTokenSourceGitHubActions.
 	SubjectTokenType string
 	// RequestedTokenType is RFC 8693 §2.1's optional requested_token_type;
 	// omitted from the request entirely when empty.
@@ -252,7 +259,7 @@ func Parse(args []string, stderr io.Writer, env Env) (*Config, error) {
 
 		subjectToken       = fs.String("subject-token", "", "subject_token for RFC 8693 token exchange (--grant-type=token-exchange); prefer --subject-token-file or $"+envKeys.subjectToken+" over this flag")
 		subjectTokenFile   = fs.String("subject-token-file", "", "path to a file containing the subject_token (trailing newline trimmed); takes precedence over --subject-token")
-		subjectTokenType   = fs.String("subject-token-type", DefaultSubjectTokenType, "subject_token_type per RFC 8693 §3 (--grant-type=token-exchange)")
+		subjectTokenType   = fs.String("subject-token-type", "", "subject_token_type per RFC 8693 §3 (--grant-type=token-exchange); defaults to the access_token type, or the id_token type when --subject-token-source=github-actions")
 		requestedTokenType = fs.String("requested-token-type", "", "optional requested_token_type per RFC 8693 §2.1 (--grant-type=token-exchange); omitted from the request entirely when unset")
 		subjectTokenSource = fs.String("subject-token-source", string(SubjectTokenSourceManual), "auto-fetch subject_token from an external source instead of --subject-token: \"\" (manual, default) | github-actions (--grant-type=token-exchange only); mutually exclusive with --subject-token/--subject-token-file/$"+envKeys.subjectToken)
 		resources          stringSliceFlag
@@ -269,7 +276,8 @@ func Parse(args []string, stderr io.Writer, env Env) (*Config, error) {
 		TokenType:            TokenTypeAccessToken,
 		TokenStore:           cache.BackendAuto,
 		PrivateKeySigningAlg: DefaultPrivateKeySigningAlg,
-		SubjectTokenType:     DefaultSubjectTokenType,
+		// SubjectTokenType is left empty here and defaulted after the
+		// subject-token source is resolved, since the default depends on it.
 	}
 
 	// 1. Environment.
@@ -442,6 +450,18 @@ func Parse(args []string, stderr io.Writer, env Env) (*Config, error) {
 			return nil, fmt.Errorf("config: %w", err)
 		}
 		cfg.TokenStoreDir = dir
+	}
+
+	// Default subject_token_type once the source is known: the GitHub Actions
+	// OIDC endpoint issues an ID token, so github-actions defaults to the
+	// id_token type; every other source keeps the generic access_token default.
+	// An explicit --subject-token-type (or env/file value) already set it here.
+	if cfg.SubjectTokenType == "" {
+		if cfg.SubjectTokenSource == SubjectTokenSourceGitHubActions {
+			cfg.SubjectTokenType = DefaultSubjectTokenTypeGitHubActions
+		} else {
+			cfg.SubjectTokenType = DefaultSubjectTokenType
+		}
 	}
 
 	if err := cfg.validate(); err != nil {

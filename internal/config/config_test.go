@@ -460,6 +460,35 @@ func TestParse_TokenExchange_WithSubjectToken_Succeeds(t *testing.T) {
 	}
 }
 
+func TestParse_TokenExchange_GitHubActionsSource_DefaultsIDTokenType(t *testing.T) {
+	var stderr bytes.Buffer
+	cfg, err := Parse([]string{
+		"--issuer=https://issuer.example", "--client-id=cid", "--grant-type=token-exchange",
+		"--subject-token-source=github-actions",
+	}, &stderr, Env{Getenv: noEnv})
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.SubjectTokenType != DefaultSubjectTokenTypeGitHubActions {
+		t.Errorf("SubjectTokenType = %q, want github-actions default %q", cfg.SubjectTokenType, DefaultSubjectTokenTypeGitHubActions)
+	}
+}
+
+func TestParse_TokenExchange_GitHubActionsSource_ExplicitTypeWins(t *testing.T) {
+	var stderr bytes.Buffer
+	cfg, err := Parse([]string{
+		"--issuer=https://issuer.example", "--client-id=cid", "--grant-type=token-exchange",
+		"--subject-token-source=github-actions",
+		"--subject-token-type=" + DefaultSubjectTokenType,
+	}, &stderr, Env{Getenv: noEnv})
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.SubjectTokenType != DefaultSubjectTokenType {
+		t.Errorf("SubjectTokenType = %q, want explicit override %q", cfg.SubjectTokenType, DefaultSubjectTokenType)
+	}
+}
+
 func TestParse_SubjectTokenFile_TakesPrecedenceOverFlag(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "subject-token")
 	if err := os.WriteFile(path, []byte("file-subject-token\n"), 0o600); err != nil {
