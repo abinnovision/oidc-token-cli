@@ -25,12 +25,16 @@ checksum:
   name_template: "checksums.txt"
 
 changelog:
-  sort: asc
+  # release-please owns the changelog (CHANGELOG.md + GitHub Release notes).
+  disable: true
 
 release:
   github:
     owner: abinnovision
     name: oidc-token-cli
+  # Attach archives + checksums to the Release that release-please already
+  # created for this tag, instead of trying to recreate it.
+  mode: append
 
 homebrew_casks:
   - name: oidc-token-cli
