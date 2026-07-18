@@ -35,6 +35,12 @@ release:
   # Attach archives + checksums to the Release that release-please already
   # created for this tag, instead of trying to recreate it.
   mode: append
+  # release-please cuts the release as a draft (draft + force-tag-creation in
+  # release-please-config.json). Drafts are excluded from GitHub's "latest", so
+  # the Install oidc-token-cli step above still bootstraps from the last stable
+  # release instead of this empty one. use_existing_draft lets GoReleaser adopt
+  # that draft by name, append the archives, and publish it (draft defaults false).
+  use_existing_draft: true
 
 homebrew_casks:
   - name: oidc-token-cli

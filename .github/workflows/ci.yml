@@ -145,6 +145,7 @@ jobs:
             --subject-token-type urn:ietf:params:oauth:token-type:id_token \
             --audience gtb-abinnovision \
             --resource abinnovision/homebrew-tap \
+            --scope "contents:write" \
             --non-interactive)
 
           if [ -z "${token}" ]; then
