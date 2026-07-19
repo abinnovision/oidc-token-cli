@@ -125,6 +125,16 @@ func (p *Provider) postTokenRequest(ctx context.Context, tokenURL string, v url.
 		return nil, fmt.Errorf("parse token response: %w", err)
 	}
 
+	var raw map[string]any
+	_ = json.Unmarshal(body, &raw)
+	for _, k := range []string{
+		"access_token", "token_type", "refresh_token", "expires_in",
+		"id_token", "issued_token_type",
+		"error", "error_description", "error_uri",
+	} {
+		delete(raw, k)
+	}
+
 	if resp.StatusCode < 200 || resp.StatusCode > 299 || tr.Error != "" {
 		return nil, &oauth2.RetrieveError{
 			Response:         resp,
@@ -146,11 +156,13 @@ func (p *Provider) postTokenRequest(ctx context.Context, tokenURL string, v url.
 	if tr.ExpiresIn > 0 {
 		tok.Expiry = time.Now().Add(time.Duration(tr.ExpiresIn) * time.Second)
 	}
-	if tr.IDToken != "" || tr.IssuedTokenType != "" {
-		tok = tok.WithExtra(map[string]any{
-			"id_token":          tr.IDToken,
-			"issued_token_type": tr.IssuedTokenType,
-		})
+	extra := map[string]any{
+		"id_token":          tr.IDToken,
+		"issued_token_type": tr.IssuedTokenType,
 	}
+	if len(raw) > 0 {
+		extra["_extensions"] = raw
+	}
+	tok = tok.WithExtra(extra)
 	return tok, nil
 }
