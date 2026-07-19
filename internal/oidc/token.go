@@ -29,6 +29,9 @@ func (p *Provider) toResult(ctx context.Context, tok *oauth2.Token, expectedNonc
 	if issuedTokenType, ok := tok.Extra("issued_token_type").(string); ok {
 		res.IssuedTokenType = issuedTokenType
 	}
+	if ext, ok := tok.Extra("_extensions").(map[string]any); ok && len(ext) > 0 {
+		res.Extra = ext
+	}
 
 	raw, ok := tok.Extra("id_token").(string)
 	if ok && raw != "" {
