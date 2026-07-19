@@ -31,6 +31,16 @@ brew install abinnovision/tap/oidc-token
 Or download a release binary (darwin/linux, amd64/arm64) from the
 [releases page](https://github.com/abinnovision/oidc-token-cli/releases).
 
+## Quick start
+
+```sh
+# First run: opens a browser (or prints a device code), then caches the token.
+oidc-token --issuer https://id.example.com/ --client-id my-public-client
+
+# Every run after: served from cache, silently refreshed.
+oidc-token --issuer https://id.example.com/ --client-id my-public-client
+```
+
 ## Usage
 
 ```sh
@@ -57,6 +67,8 @@ oidc-token \
   [--requested-token-type TYPE] [--resource URI ...]
 ```
 
+#### Core flags
+
 | Flag | Default | Description |
 |---|---|---|
 | `--issuer` | *(required)* | OIDC issuer URL (HTTPS, except loopback in tests). Discovery's `issuer` field must match exactly. |
@@ -65,39 +77,52 @@ oidc-token \
 | `--audience` | *(empty)* | Expected `aud` claim — required if the relying party checks audience (e.g. frp's `auth.oidc.audience`). |
 | `--grant-type` | `auto` | `auto`, `authcode`, `device-code`, or `token-exchange`. See [Grant selection](#grant-selection) and [Token exchange](#token-exchange-rfc-8693). |
 | `--token-type` | `access_token` | Which field bare mode prints. |
-| `--token-store-dir` | `$XDG_CACHE_HOME/oidc-token` | Override the token store directory (used by the `file` backend and, in `auto` mode, as the fallback store). Ignored when `--token-store=none`. |
+
+#### Cache and storage
+
+| Flag | Default | Description |
+|---|---|---|
 | `--token-store` | `auto` | `auto`, `keychain`, `file`, or `none`. See [Token store](#token-store). |
+| `--token-store-dir` | `$XDG_CACHE_HOME/oidc-token` | Override the token store directory (used by the `file` backend and, in `auto` mode, as the fallback store). Ignored when `--token-store=none`. |
+
+#### Behavior
+
+| Flag | Default | Description |
+|---|---|---|
 | `--redirect` | `0` (ephemeral) | Fixed loopback port for the authcode callback, if your IdP requires an exact redirect URI. |
 | `--non-interactive` | `false` | Never emit a device-code prompt; authcode+browser is still allowed if a display is available. |
 | `--all` | `false` | Print a JSON document instead of a bare token. |
 | `--logout` | `false` | Clear the cached entry for `--issuer`/`--client-id` and exit; no login or refresh is attempted. |
 | `--config` | *(none)* | Optional JSON config file. |
+
+#### Confidential client flags
+
+| Flag | Default | Description |
+|---|---|---|
 | `--client-auth-method` | *(none, public client)* | `client_secret_basic`, `client_secret_post`, or `private_key_jwt`. See [Confidential clients](#confidential-clients). |
 | `--client-secret` / `--client-secret-file` | *(none)* | Client secret for `client_secret_basic`/`client_secret_post`. Prefer `--client-secret-file` or `$OIDC_TOKEN_CLIENT_SECRET` over the bare flag; `--client-secret-file` wins if both are set. |
 | `--private-key-file` | *(none)* | PEM file (PKCS#1/PKCS#8/EC) used to sign the `private_key_jwt` client assertion. |
 | `--private-key-id` | *(none)* | Optional `kid` header on the client assertion. |
 | `--private-key-alg` | `RS256` | JWS signing algorithm: `RS256`/`RS384`/`RS512`/`PS256`/`PS384`/`PS512`/`ES256`/`ES384`/`ES512`. |
 | `--client-assertion-audience` | *(the discovered token endpoint)* | Override the assertion's `aud` claim, for issuers that expect the issuer URL or something else instead. |
+
+#### Token exchange flags
+
+| Flag | Default | Description |
+|---|---|---|
 | `--subject-token` / `--subject-token-file` | *(none)* | RFC 8693 `subject_token` for `--grant-type=token-exchange`. Prefer `--subject-token-file` or `$OIDC_TOKEN_SUBJECT_TOKEN` over the bare flag; `--subject-token-file` wins if both are set. |
 | `--subject-token-source` | *(empty, manual)* | `github-actions`: auto-fetch `--subject-token` from GitHub Actions' native OIDC provider instead of supplying it manually. Mutually exclusive with `--subject-token`/`--subject-token-file`/`$OIDC_TOKEN_SUBJECT_TOKEN`; requires `--grant-type=token-exchange`. See [Subject token sources](#subject-token-sources). |
 | `--subject-token-type` | `urn:ietf:params:oauth:token-type:access_token` (or `…:id_token` when `--subject-token-source=github-actions`) | RFC 8693 `subject_token_type`. |
 | `--requested-token-type` | *(none)* | RFC 8693 `requested_token_type`; omitted from the request entirely when unset. |
 | `--resource` | *(none)* | RFC 8693 `resource` target URI; repeatable for multiple resource params. |
 
-Every flag except `--config`/`--client-secret-file`/`--subject-token-file`/
-`--resource` also has an env var: `OIDC_TOKEN_ISSUER`,
-`OIDC_TOKEN_CLIENT_ID`, `OIDC_TOKEN_SCOPE`, `OIDC_TOKEN_AUDIENCE`,
-`OIDC_TOKEN_GRANT_TYPE`, `OIDC_TOKEN_TOKEN_TYPE`, `OIDC_TOKEN_STORE_DIR`,
-`OIDC_TOKEN_STORE`, `OIDC_TOKEN_NON_INTERACTIVE`, `OIDC_TOKEN_LOGOUT`,
-`OIDC_TOKEN_CLIENT_AUTH_METHOD`, `OIDC_TOKEN_CLIENT_SECRET`,
-`OIDC_TOKEN_PRIVATE_KEY_FILE`, `OIDC_TOKEN_PRIVATE_KEY_ID`,
-`OIDC_TOKEN_PRIVATE_KEY_ALG`, `OIDC_TOKEN_CLIENT_ASSERTION_AUDIENCE`,
-`OIDC_TOKEN_SUBJECT_TOKEN`, `OIDC_TOKEN_SUBJECT_TOKEN_TYPE`,
-`OIDC_TOKEN_SUBJECT_TOKEN_SOURCE`.
-`OIDC_TOKEN_CLIENT_SECRET` (or `--client-secret-file`) is the recommended
-way to pass a secret — avoid `--client-secret` on the command line where it
-can land in shell history or process listings. Precedence: defaults < env <
-`--config` file < explicit flags.
+Every flag (except `--config`, `--client-secret-file`, `--subject-token-file`,
+and `--resource`) has an `OIDC_TOKEN_*` env var (e.g. `--issuer` becomes
+`OIDC_TOKEN_ISSUER`). Prefer `OIDC_TOKEN_CLIENT_SECRET` or
+`--client-secret-file` over `--client-secret` on the command line — the
+bare flag can leak into shell history or process listings.
+
+Precedence: defaults < env < `--config` file < explicit flags.
 
 ### Grant selection
 
@@ -112,10 +137,11 @@ what the environment supports:
 Authcode is tried first when both are viable. If the client is rejected
 for the grant it tried (`unauthorized_client`/`invalid_grant` at the
 authorization endpoint), it falls back to the other viable grant once —
-capped at 2 attempts total, no cycling back. `--grant-type=authcode` or
-`=device-code` forces one grant and fails fast if it isn't viable, with a
-diagnostic describing what the IdP offers and why browser/terminal
-viability failed.
+capped at 2 attempts total, no cycling back.
+
+`--grant-type=authcode` or `=device-code` forces one grant and fails fast
+if it isn't viable, with a diagnostic describing what the IdP offers and
+why browser/terminal viability failed.
 
 ### Confidential clients
 
@@ -216,11 +242,13 @@ SHA-256 hash of the pair so those values don't leak into keys/filenames.
 The file store lives at `--token-store-dir` (default `$XDG_CACHE_HOME/oidc-token`
 or `~/.cache/oidc-token`); files are `0600`, written atomically, and
 refreshes run under an advisory `flock` so concurrent invocations converge
-on one winner instead of each re-authenticating. `auto` mode reuses that
-same `flock` for cross-process coordination even when the token payload
-lives in the keychain; `keychain`-enforce mode has no cross-process lock
-(OS keychains expose no such primitive), so concurrent invocations against
-the same profile aren't fully serialized in that mode.
+on one winner instead of each re-authenticating.
+
+`auto` mode reuses that same `flock` for cross-process coordination even
+when the token payload lives in the keychain; `keychain`-enforce mode has
+no cross-process lock (OS keychains expose no such primitive), so
+concurrent invocations against the same profile aren't fully serialized
+in that mode.
 
 There's no migration between backends: switching an existing profile from
 `file` to `auto`/`keychain` on a machine with a working keychain triggers
@@ -235,10 +263,12 @@ No cgo dependency either way — the keychain backend shells out to
 
 First run (cache empty) opens a browser or prints a device code and
 blocks until login completes. Every run after that is served from cache
-or silently refreshed. If the cache is cold *and* no grant is viable
-(headless CI with `--non-interactive`), it fails fast — it will never
-print a device-code prompt nobody can see. Warm the cache once,
-interactively, before wiring `oidc-token` into a non-interactive job.
+or silently refreshed.
+
+If the cache is cold *and* no grant is viable (headless CI with
+`--non-interactive`), it fails fast — it will never print a device-code
+prompt nobody can see. Warm the cache once, interactively, before wiring
+`oidc-token` into a non-interactive job.
 
 ## Recipes
 
@@ -324,6 +354,7 @@ plus a GitHub release and a Homebrew formula update in
 [`abinnovision/homebrew-tap`](https://github.com/abinnovision/homebrew-tap)
 (push token minted per-release by running `oidc-token-cli` itself against
 gh-token-broker's token-exchange endpoint, not a stored PAT).
+
 `.goreleaser.yaml` intentionally uses the `brews` key (not
 `homebrew_casks` — casks get Gatekeeper-quarantined on an unsigned binary);
 `goreleaser check` will report a `brews` deprecation warning, which is
