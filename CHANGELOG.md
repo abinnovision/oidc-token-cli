@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/abinnovision/oidc-token-cli/compare/v0.7.0...v0.8.0) (2026-07-19)
+
+
+### Features
+
+* forward all STS extension fields in --all output ([#27](https://github.com/abinnovision/oidc-token-cli/issues/27)) ([da9b2b3](https://github.com/abinnovision/oidc-token-cli/commit/da9b2b32fee61f7d032919c725902cada242d361))
+
 ## [0.7.0](https://github.com/abinnovision/oidc-token-cli/compare/v0.6.0...v0.7.0) (2026-07-18)
 
 
