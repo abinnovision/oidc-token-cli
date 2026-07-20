@@ -34,6 +34,7 @@ func newRealSource(cfg *config.Config) runner.TokenSource {
 		PrivateKeyID:            cfg.PrivateKeyID,
 		PrivateKeySigningAlg:    cfg.SigningAlg(),
 		ClientAssertionAudience: cfg.ClientAssertionAudience,
+		ExtraFields:             cfg.ExtraFields,
 	}
 }
 
@@ -53,6 +54,7 @@ func newRealTokenExchangeSource(cfg *config.Config) tokenExchanger {
 		PrivateKeyID:            cfg.PrivateKeyID,
 		PrivateKeySigningAlg:    cfg.SigningAlg(),
 		ClientAssertionAudience: cfg.ClientAssertionAudience,
+		ExtraFields:             cfg.ExtraFields,
 	}
 }
 

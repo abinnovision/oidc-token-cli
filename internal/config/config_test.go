@@ -12,6 +12,10 @@ import (
 	"testing"
 
 	"github.com/abinnovision/oidc-token-cli/internal/cache"
+	"github.com/abinnovision/oidc-token-cli/internal/grant"
+	"github.com/abinnovision/oidc-token-cli/internal/grant/authcode"
+	"github.com/abinnovision/oidc-token-cli/internal/grant/devicecode"
+	"github.com/abinnovision/oidc-token-cli/internal/grant/tokenexchange"
 )
 
 // writeTestPrivateKeyPEM generates an RSA key, PEM-encodes it as PKCS#8, and
@@ -34,6 +38,10 @@ func writeTestPrivateKeyPEM(t *testing.T) string {
 	return path
 }
 
+func testGrants() []grant.Grant {
+	return []grant.Grant{authcode.New(), devicecode.New(), tokenexchange.New()}
+}
+
 func noEnv(string) string { return "" }
 
 func envFrom(m map[string]string) func(string) string {
@@ -42,7 +50,7 @@ func envFrom(m map[string]string) func(string) string {
 
 func TestParse_Defaults(t *testing.T) {
 	var stderr bytes.Buffer
-	cfg, err := Parse([]string{"--issuer=https://issuer.example", "--client-id=cid"}, &stderr, Env{Getenv: noEnv})
+	cfg, err := Parse([]string{"--issuer=https://issuer.example", "--client-id=cid"}, &stderr, Env{Getenv: noEnv}, testGrants())
 	if err != nil {
 		t.Fatalf("Parse: %v (stderr: %s)", err, stderr.String())
 	}
@@ -68,7 +76,7 @@ func TestParse_Defaults(t *testing.T) {
 
 func TestParse_MissingRequiredFlags(t *testing.T) {
 	var stderr bytes.Buffer
-	if _, err := Parse(nil, &stderr, Env{Getenv: noEnv}); err == nil {
+	if _, err := Parse(nil, &stderr, Env{Getenv: noEnv}, testGrants()); err == nil {
 		t.Fatal("expected error when --issuer/--client-id are missing")
 	}
 }
@@ -79,7 +87,7 @@ func TestParse_EnvOverridesDefaults(t *testing.T) {
 		"OIDC_TOKEN_TOKEN_TYPE": "id_token",
 	})
 	var stderr bytes.Buffer
-	cfg, err := Parse([]string{"--issuer=https://issuer.example", "--client-id=cid"}, &stderr, Env{Getenv: env})
+	cfg, err := Parse([]string{"--issuer=https://issuer.example", "--client-id=cid"}, &stderr, Env{Getenv: env}, testGrants())
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -102,7 +110,7 @@ func TestParse_FileOverridesEnv(t *testing.T) {
 	var stderr bytes.Buffer
 	cfg, err := Parse([]string{
 		"--issuer=https://issuer.example", "--client-id=cid", "--config=" + path,
-	}, &stderr, Env{Getenv: env})
+	}, &stderr, Env{Getenv: env}, testGrants())
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -122,7 +130,7 @@ func TestParse_FlagsOverrideFile(t *testing.T) {
 	cfg, err := Parse([]string{
 		"--issuer=https://issuer.example", "--client-id=cid", "--config=" + path,
 		"--scope=openid from-flag",
-	}, &stderr, Env{Getenv: noEnv})
+	}, &stderr, Env{Getenv: noEnv}, testGrants())
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -135,7 +143,7 @@ func TestParse_InvalidGrantType(t *testing.T) {
 	var stderr bytes.Buffer
 	_, err := Parse([]string{
 		"--issuer=https://issuer.example", "--client-id=cid", "--grant-type=bogus",
-	}, &stderr, Env{Getenv: noEnv})
+	}, &stderr, Env{Getenv: noEnv}, testGrants())
 	if err == nil {
 		t.Fatal("expected error for invalid --grant-type")
 	}
@@ -145,7 +153,7 @@ func TestParse_InvalidTokenType(t *testing.T) {
 	var stderr bytes.Buffer
 	_, err := Parse([]string{
 		"--issuer=https://issuer.example", "--client-id=cid", "--token-type=bogus",
-	}, &stderr, Env{Getenv: noEnv})
+	}, &stderr, Env{Getenv: noEnv}, testGrants())
 	if err == nil {
 		t.Fatal("expected error for invalid --token-type")
 	}
@@ -155,7 +163,7 @@ func TestParse_TokenStoreDirOverride(t *testing.T) {
 	var stderr bytes.Buffer
 	cfg, err := Parse([]string{
 		"--issuer=https://issuer.example", "--client-id=cid", "--token-store-dir=/tmp/custom-cache",
-	}, &stderr, Env{Getenv: noEnv})
+	}, &stderr, Env{Getenv: noEnv}, testGrants())
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -168,7 +176,7 @@ func TestParse_TokenStoreFlag(t *testing.T) {
 	var stderr bytes.Buffer
 	cfg, err := Parse([]string{
 		"--issuer=https://issuer.example", "--client-id=cid", "--token-store=keychain",
-	}, &stderr, Env{Getenv: noEnv})
+	}, &stderr, Env{Getenv: noEnv}, testGrants())
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -182,7 +190,7 @@ func TestParse_TokenStoreEnv(t *testing.T) {
 	var stderr bytes.Buffer
 	cfg, err := Parse([]string{
 		"--issuer=https://issuer.example", "--client-id=cid",
-	}, &stderr, Env{Getenv: env})
+	}, &stderr, Env{Getenv: env}, testGrants())
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -196,7 +204,7 @@ func TestParse_TokenStoreFlagOverridesEnv(t *testing.T) {
 	var stderr bytes.Buffer
 	cfg, err := Parse([]string{
 		"--issuer=https://issuer.example", "--client-id=cid", "--token-store=keychain",
-	}, &stderr, Env{Getenv: env})
+	}, &stderr, Env{Getenv: env}, testGrants())
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -209,7 +217,7 @@ func TestParse_TokenStoreNone(t *testing.T) {
 	var stderr bytes.Buffer
 	cfg, err := Parse([]string{
 		"--issuer=https://issuer.example", "--client-id=cid", "--token-store=none",
-	}, &stderr, Env{Getenv: noEnv})
+	}, &stderr, Env{Getenv: noEnv}, testGrants())
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -225,7 +233,7 @@ func TestParse_TokenStoreNone_SkipsDefaultDirResolution(t *testing.T) {
 	var stderr bytes.Buffer
 	cfg, err := Parse([]string{
 		"--issuer=https://issuer.example", "--client-id=cid", "--token-store=none",
-	}, &stderr, Env{Getenv: env})
+	}, &stderr, Env{Getenv: env}, testGrants())
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -238,7 +246,7 @@ func TestParse_InvalidTokenStore(t *testing.T) {
 	var stderr bytes.Buffer
 	_, err := Parse([]string{
 		"--issuer=https://issuer.example", "--client-id=cid", "--token-store=bogus",
-	}, &stderr, Env{Getenv: noEnv})
+	}, &stderr, Env{Getenv: noEnv}, testGrants())
 	if err == nil {
 		t.Fatal("expected error for invalid --token-store")
 	}
@@ -248,7 +256,7 @@ func TestParse_LogoutFlag(t *testing.T) {
 	var stderr bytes.Buffer
 	cfg, err := Parse([]string{
 		"--issuer=https://issuer.example", "--client-id=cid", "--logout",
-	}, &stderr, Env{Getenv: noEnv})
+	}, &stderr, Env{Getenv: noEnv}, testGrants())
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -262,7 +270,7 @@ func TestParse_LogoutEnv(t *testing.T) {
 	var stderr bytes.Buffer
 	cfg, err := Parse([]string{
 		"--issuer=https://issuer.example", "--client-id=cid",
-	}, &stderr, Env{Getenv: env})
+	}, &stderr, Env{Getenv: env}, testGrants())
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -275,7 +283,7 @@ func TestParse_ClientAuthMethod_InvalidMethod(t *testing.T) {
 	var stderr bytes.Buffer
 	_, err := Parse([]string{
 		"--issuer=https://issuer.example", "--client-id=cid", "--client-auth-method=bogus",
-	}, &stderr, Env{Getenv: noEnv})
+	}, &stderr, Env{Getenv: noEnv}, testGrants())
 	if err == nil {
 		t.Fatal("expected error for invalid --client-auth-method")
 	}
@@ -285,7 +293,7 @@ func TestParse_ClientSecretBasic_RequiresSecret(t *testing.T) {
 	var stderr bytes.Buffer
 	_, err := Parse([]string{
 		"--issuer=https://issuer.example", "--client-id=cid", "--client-auth-method=client_secret_basic",
-	}, &stderr, Env{Getenv: noEnv})
+	}, &stderr, Env{Getenv: noEnv}, testGrants())
 	if err == nil {
 		t.Fatal("expected error when client_secret_basic is selected without --client-secret")
 	}
@@ -296,7 +304,7 @@ func TestParse_ClientSecretBasic_WithSecret(t *testing.T) {
 	cfg, err := Parse([]string{
 		"--issuer=https://issuer.example", "--client-id=cid",
 		"--client-auth-method=client_secret_basic", "--client-secret=s3cr3t",
-	}, &stderr, Env{Getenv: noEnv})
+	}, &stderr, Env{Getenv: noEnv}, testGrants())
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -319,7 +327,7 @@ func TestParse_ClientSecretFile_TakesPrecedenceOverFlag(t *testing.T) {
 		"--client-auth-method=client_secret_post",
 		"--client-secret=flag-secret",
 		"--client-secret-file=" + path,
-	}, &stderr, Env{Getenv: noEnv})
+	}, &stderr, Env{Getenv: noEnv}, testGrants())
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -332,7 +340,7 @@ func TestParse_ClientSecretWithoutMethod_Errors(t *testing.T) {
 	var stderr bytes.Buffer
 	_, err := Parse([]string{
 		"--issuer=https://issuer.example", "--client-id=cid", "--client-secret=s3cr3t",
-	}, &stderr, Env{Getenv: noEnv})
+	}, &stderr, Env{Getenv: noEnv}, testGrants())
 	if err == nil {
 		t.Fatal("expected error when --client-secret is set without --client-auth-method")
 	}
@@ -342,7 +350,7 @@ func TestParse_PrivateKeyJWT_RequiresKeyFile(t *testing.T) {
 	var stderr bytes.Buffer
 	_, err := Parse([]string{
 		"--issuer=https://issuer.example", "--client-id=cid", "--client-auth-method=private_key_jwt",
-	}, &stderr, Env{Getenv: noEnv})
+	}, &stderr, Env{Getenv: noEnv}, testGrants())
 	if err == nil {
 		t.Fatal("expected error when private_key_jwt is selected without --private-key-file")
 	}
@@ -354,7 +362,7 @@ func TestParse_PrivateKeyJWT_InvalidAlg(t *testing.T) {
 	_, err := Parse([]string{
 		"--issuer=https://issuer.example", "--client-id=cid",
 		"--client-auth-method=private_key_jwt", "--private-key-file=" + path, "--private-key-alg=bogus",
-	}, &stderr, Env{Getenv: noEnv})
+	}, &stderr, Env{Getenv: noEnv}, testGrants())
 	if err == nil {
 		t.Fatal("expected error for invalid --private-key-alg")
 	}
@@ -366,7 +374,7 @@ func TestParse_PrivateKeyJWT_ParsesKeyAndDefaultsAlg(t *testing.T) {
 	cfg, err := Parse([]string{
 		"--issuer=https://issuer.example", "--client-id=cid",
 		"--client-auth-method=private_key_jwt", "--private-key-file=" + path,
-	}, &stderr, Env{Getenv: noEnv})
+	}, &stderr, Env{Getenv: noEnv}, testGrants())
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -387,7 +395,7 @@ func TestParse_PrivateKeyJWT_BadPEM_Errors(t *testing.T) {
 	_, err := Parse([]string{
 		"--issuer=https://issuer.example", "--client-id=cid",
 		"--client-auth-method=private_key_jwt", "--private-key-file=" + path,
-	}, &stderr, Env{Getenv: noEnv})
+	}, &stderr, Env{Getenv: noEnv}, testGrants())
 	if err == nil {
 		t.Fatal("expected error for a malformed --private-key-file")
 	}
@@ -402,7 +410,7 @@ func TestParse_ClientAuthMethod_EnvOverridesDefaults(t *testing.T) {
 		"OIDC_TOKEN_PRIVATE_KEY_ALG":    "ES256",
 	})
 	var stderr bytes.Buffer
-	cfg, err := Parse([]string{"--issuer=https://issuer.example", "--client-id=cid"}, &stderr, Env{Getenv: env})
+	cfg, err := Parse([]string{"--issuer=https://issuer.example", "--client-id=cid"}, &stderr, Env{Getenv: env}, testGrants())
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -424,7 +432,7 @@ func TestParse_ClientAssertionAudience_FlagOverride(t *testing.T) {
 		"--issuer=https://issuer.example", "--client-id=cid",
 		"--client-auth-method=private_key_jwt", "--private-key-file=" + path,
 		"--client-assertion-audience=https://issuer.example/custom-aud",
-	}, &stderr, Env{Getenv: noEnv})
+	}, &stderr, Env{Getenv: noEnv}, testGrants())
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -437,7 +445,7 @@ func TestParse_TokenExchange_RequiresSubjectToken(t *testing.T) {
 	var stderr bytes.Buffer
 	_, err := Parse([]string{
 		"--issuer=https://issuer.example", "--client-id=cid", "--grant-type=token-exchange",
-	}, &stderr, Env{Getenv: noEnv})
+	}, &stderr, Env{Getenv: noEnv}, testGrants())
 	if err == nil {
 		t.Fatal("expected error when --grant-type=token-exchange is set without --subject-token")
 	}
@@ -448,7 +456,7 @@ func TestParse_TokenExchange_WithSubjectToken_Succeeds(t *testing.T) {
 	cfg, err := Parse([]string{
 		"--issuer=https://issuer.example", "--client-id=cid", "--grant-type=token-exchange",
 		"--subject-token=sub-tok",
-	}, &stderr, Env{Getenv: noEnv})
+	}, &stderr, Env{Getenv: noEnv}, testGrants())
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -465,7 +473,7 @@ func TestParse_TokenExchange_GitHubActionsSource_DefaultsIDTokenType(t *testing.
 	cfg, err := Parse([]string{
 		"--issuer=https://issuer.example", "--client-id=cid", "--grant-type=token-exchange",
 		"--subject-token-source=github-actions",
-	}, &stderr, Env{Getenv: noEnv})
+	}, &stderr, Env{Getenv: noEnv}, testGrants())
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -480,7 +488,7 @@ func TestParse_TokenExchange_GitHubActionsSource_ExplicitTypeWins(t *testing.T) 
 		"--issuer=https://issuer.example", "--client-id=cid", "--grant-type=token-exchange",
 		"--subject-token-source=github-actions",
 		"--subject-token-type=" + DefaultSubjectTokenType,
-	}, &stderr, Env{Getenv: noEnv})
+	}, &stderr, Env{Getenv: noEnv}, testGrants())
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -499,7 +507,7 @@ func TestParse_SubjectTokenFile_TakesPrecedenceOverFlag(t *testing.T) {
 		"--issuer=https://issuer.example", "--client-id=cid", "--grant-type=token-exchange",
 		"--subject-token=flag-subject-token",
 		"--subject-token-file=" + path,
-	}, &stderr, Env{Getenv: noEnv})
+	}, &stderr, Env{Getenv: noEnv}, testGrants())
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -516,7 +524,7 @@ func TestParse_SubjectToken_EnvOverridesDefaults(t *testing.T) {
 	var stderr bytes.Buffer
 	cfg, err := Parse([]string{
 		"--issuer=https://issuer.example", "--client-id=cid", "--grant-type=token-exchange",
-	}, &stderr, Env{Getenv: env})
+	}, &stderr, Env{Getenv: env}, testGrants())
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -534,7 +542,7 @@ func TestParse_Resource_Repeatable(t *testing.T) {
 		"--issuer=https://issuer.example", "--client-id=cid", "--grant-type=token-exchange",
 		"--subject-token=sub-tok",
 		"--resource=https://a.example/", "--resource=https://b.example/",
-	}, &stderr, Env{Getenv: noEnv})
+	}, &stderr, Env{Getenv: noEnv}, testGrants())
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -549,7 +557,7 @@ func TestParse_RequestedTokenType_OptionalOmitted(t *testing.T) {
 	cfg, err := Parse([]string{
 		"--issuer=https://issuer.example", "--client-id=cid", "--grant-type=token-exchange",
 		"--subject-token=sub-tok",
-	}, &stderr, Env{Getenv: noEnv})
+	}, &stderr, Env{Getenv: noEnv}, testGrants())
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -562,7 +570,7 @@ func TestParse_SubjectTokenWithoutGrantType_Errors(t *testing.T) {
 	var stderr bytes.Buffer
 	_, err := Parse([]string{
 		"--issuer=https://issuer.example", "--client-id=cid", "--subject-token=sub-tok",
-	}, &stderr, Env{Getenv: noEnv})
+	}, &stderr, Env{Getenv: noEnv}, testGrants())
 	if err == nil {
 		t.Fatal("expected error when --subject-token is set without --grant-type=token-exchange")
 	}
@@ -573,7 +581,7 @@ func TestParse_SubjectTokenSource_GitHubActions_Succeeds(t *testing.T) {
 	cfg, err := Parse([]string{
 		"--issuer=https://issuer.example", "--client-id=cid", "--grant-type=token-exchange",
 		"--subject-token-source=github-actions",
-	}, &stderr, Env{Getenv: noEnv})
+	}, &stderr, Env{Getenv: noEnv}, testGrants())
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -590,7 +598,7 @@ func TestParse_SubjectTokenSource_MutuallyExclusiveWithSubjectToken(t *testing.T
 	_, err := Parse([]string{
 		"--issuer=https://issuer.example", "--client-id=cid", "--grant-type=token-exchange",
 		"--subject-token-source=github-actions", "--subject-token=sub-tok",
-	}, &stderr, Env{Getenv: noEnv})
+	}, &stderr, Env{Getenv: noEnv}, testGrants())
 	if err == nil {
 		t.Fatal("expected error when --subject-token-source and --subject-token are both set")
 	}
@@ -602,7 +610,7 @@ func TestParse_SubjectTokenSource_MutuallyExclusiveWithEnvSubjectToken(t *testin
 	_, err := Parse([]string{
 		"--issuer=https://issuer.example", "--client-id=cid", "--grant-type=token-exchange",
 		"--subject-token-source=github-actions",
-	}, &stderr, Env{Getenv: env})
+	}, &stderr, Env{Getenv: env}, testGrants())
 	if err == nil {
 		t.Fatal("expected error when --subject-token-source is set and $OIDC_TOKEN_SUBJECT_TOKEN is also set")
 	}
@@ -613,7 +621,7 @@ func TestParse_SubjectTokenSource_RequiresTokenExchangeGrant(t *testing.T) {
 	_, err := Parse([]string{
 		"--issuer=https://issuer.example", "--client-id=cid", "--grant-type=auto",
 		"--subject-token-source=github-actions",
-	}, &stderr, Env{Getenv: noEnv})
+	}, &stderr, Env{Getenv: noEnv}, testGrants())
 	if err == nil {
 		t.Fatal("expected error when --subject-token-source is set without --grant-type=token-exchange")
 	}
@@ -624,7 +632,7 @@ func TestParse_SubjectTokenSource_UnknownValue_Errors(t *testing.T) {
 	_, err := Parse([]string{
 		"--issuer=https://issuer.example", "--client-id=cid", "--grant-type=token-exchange",
 		"--subject-token-source=gitlab-ci",
-	}, &stderr, Env{Getenv: noEnv})
+	}, &stderr, Env{Getenv: noEnv}, testGrants())
 	if err == nil {
 		t.Fatal("expected error for an unknown --subject-token-source value")
 	}
@@ -635,7 +643,7 @@ func TestParse_SubjectTokenSource_EnvVar(t *testing.T) {
 	var stderr bytes.Buffer
 	cfg, err := Parse([]string{
 		"--issuer=https://issuer.example", "--client-id=cid", "--grant-type=token-exchange",
-	}, &stderr, Env{Getenv: env})
+	}, &stderr, Env{Getenv: env}, testGrants())
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -655,7 +663,7 @@ func TestParse_SubjectTokenSource_FileConfig(t *testing.T) {
 	cfg, err := Parse([]string{
 		"--issuer=https://issuer.example", "--client-id=cid", "--grant-type=token-exchange",
 		"--config=" + path,
-	}, &stderr, Env{Getenv: noEnv})
+	}, &stderr, Env{Getenv: noEnv}, testGrants())
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}

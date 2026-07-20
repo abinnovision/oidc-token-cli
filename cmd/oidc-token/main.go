@@ -18,6 +18,10 @@ import (
 
 	"github.com/abinnovision/oidc-token-cli/internal/cache"
 	"github.com/abinnovision/oidc-token-cli/internal/config"
+	"github.com/abinnovision/oidc-token-cli/internal/grant"
+	grantauthcode "github.com/abinnovision/oidc-token-cli/internal/grant/authcode"
+	grantdevicecode "github.com/abinnovision/oidc-token-cli/internal/grant/devicecode"
+	granttokenexchange "github.com/abinnovision/oidc-token-cli/internal/grant/tokenexchange"
 	"github.com/abinnovision/oidc-token-cli/internal/output"
 	"github.com/abinnovision/oidc-token-cli/internal/runner"
 )
@@ -77,7 +81,12 @@ func buildStore(ctx context.Context, cfg *config.Config, stderr io.Writer) (cach
 // place, guarded by err == nil, so a bug elsewhere cannot leak a partial or
 // empty token onto stdout with a zero exit code.
 func run(args []string, stdout, stderr io.Writer, newSource newSourceFunc, newTokenExchange newTokenExchangeFunc, resolveSubjectToken resolveSubjectTokenFunc) int {
-	cfg, err := config.Parse(args, stderr, config.Env{Getenv: os.Getenv})
+	grants := []grant.Grant{
+		grantauthcode.New(),
+		grantdevicecode.New(),
+		granttokenexchange.New(),
+	}
+	cfg, err := config.Parse(args, stderr, config.Env{Getenv: os.Getenv}, grants)
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			// Usage was already written to stderr by the flag package;

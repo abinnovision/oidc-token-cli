@@ -21,7 +21,7 @@ const tokenExchangeGrantType = "urn:ietf:params:oauth:grant-type:token-exchange"
 // RFC 8693 §2.1's OPTIONAL semantics -- this package never sends a default.
 // resources is sent as repeated "resource" params (RFC 8693 permits more
 // than one in a single request).
-func (p *Provider) TokenExchange(ctx context.Context, scope, subjectToken, subjectTokenType, requestedTokenType string, resources []string) (output.Result, error) {
+func (p *Provider) TokenExchange(ctx context.Context, scope, subjectToken, subjectTokenType, requestedTokenType string, resources []string, extraFields url.Values) (output.Result, error) {
 	ctx = withHTTPClient(ctx)
 
 	v := url.Values{
@@ -40,6 +40,11 @@ func (p *Provider) TokenExchange(ctx context.Context, scope, subjectToken, subje
 	}
 	for _, r := range resources {
 		v.Add("resource", r)
+	}
+	for k, vs := range extraFields {
+		for _, ev := range vs {
+			v.Add(k, ev)
+		}
 	}
 
 	tok, err := p.postTokenRequest(ctx, p.tokenEndpoint(), v)

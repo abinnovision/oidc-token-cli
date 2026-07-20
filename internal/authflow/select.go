@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"sync"
 
 	jose "github.com/go-jose/go-jose/v4"
@@ -63,10 +64,10 @@ type grantSource interface {
 	// issuer appears to support — never hardcode a grant name in an error
 	// message when this is available instead.
 	AdvertisedGrants() string
-	DeviceLogin(ctx context.Context, scope string, prompt io.Writer) (output.Result, error)
-	AuthCodeLogin(ctx context.Context, scope string, port int, openBrowser func(string) error, prompt, hint io.Writer) (output.Result, error)
+	DeviceLogin(ctx context.Context, scope string, prompt io.Writer, extraFields url.Values) (output.Result, error)
+	AuthCodeLogin(ctx context.Context, scope string, port int, openBrowser func(string) error, prompt, hint io.Writer, extraFields url.Values) (output.Result, error)
 	Refresh(ctx context.Context, scope, refreshToken string) (output.Result, error)
-	TokenExchange(ctx context.Context, scope, subjectToken, subjectTokenType, requestedTokenType string, resources []string) (output.Result, error)
+	TokenExchange(ctx context.Context, scope, subjectToken, subjectTokenType, requestedTokenType string, resources []string, extraFields url.Values) (output.Result, error)
 	SetClientAuth(method oidc.ClientAuthMethod, secret string, signer crypto.Signer, keyID string, alg jose.SignatureAlgorithm, audience string)
 }
 
@@ -212,6 +213,10 @@ type Source struct {
 	// warnings. Must never be stdout.
 	Prompt io.Writer
 
+	// ExtraFields are arbitrary key=value pairs forwarded to the token
+	// endpoint for IdP-specific extensions (e.g. actor_token, resource).
+	ExtraFields url.Values
+
 	// Client-authentication configuration for the token endpoint.
 	// ClientAuthMethod == "" (oidc.ClientAuthNone) is a public client,
 	// this tool's original and still default behavior.
@@ -285,7 +290,7 @@ func (s *Source) TokenExchange(ctx context.Context, subjectToken, subjectTokenTy
 	if err != nil {
 		return output.Result{}, err
 	}
-	return p.TokenExchange(ctx, s.Scope, subjectToken, subjectTokenType, requestedTokenType, resources)
+	return p.TokenExchange(ctx, s.Scope, subjectToken, subjectTokenType, requestedTokenType, resources, s.ExtraFields)
 }
 
 // Login implements runner.TokenSource: selects a grant order via plan(),
@@ -326,9 +331,9 @@ func (s *Source) Login(ctx context.Context) (output.Result, error) {
 func (s *Source) attempt(ctx context.Context, p grantSource, grant Grant) (output.Result, error) {
 	switch grant {
 	case grantDeviceCodeURN:
-		return p.DeviceLogin(ctx, s.Scope, s.Prompt)
+		return p.DeviceLogin(ctx, s.Scope, s.Prompt, s.ExtraFields)
 	case grantAuthorizationCode:
-		return p.AuthCodeLogin(ctx, s.Scope, s.CallbackPort, s.OpenBrowser, s.Prompt, s.hintWriter())
+		return p.AuthCodeLogin(ctx, s.Scope, s.CallbackPort, s.OpenBrowser, s.Prompt, s.hintWriter(), s.ExtraFields)
 	default:
 		return output.Result{}, fmt.Errorf("authflow: unknown grant %q", grant)
 	}

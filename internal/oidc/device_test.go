@@ -23,7 +23,7 @@ func TestDeviceLogin_Success_PromptOnWriterOnly(t *testing.T) {
 	}
 
 	var prompt bytes.Buffer
-	res, err := p.DeviceLogin(context.Background(), "openid offline_access", &prompt)
+	res, err := p.DeviceLogin(context.Background(), "openid offline_access", &prompt, nil)
 	if err != nil {
 		t.Fatalf("DeviceLogin: %v", err)
 	}
@@ -51,7 +51,7 @@ func TestDeviceLogin_NotAdvertised_ClearError(t *testing.T) {
 	}
 
 	var prompt bytes.Buffer
-	_, err = p.DeviceLogin(context.Background(), "openid", &prompt)
+	_, err = p.DeviceLogin(context.Background(), "openid", &prompt, nil)
 	if err == nil {
 		t.Fatal("expected an error when the issuer does not advertise device_authorization_endpoint")
 	}
@@ -79,7 +79,7 @@ func TestDeviceLogin_OmittedExpiresIn_BoundedByFallbackTimeout(t *testing.T) {
 
 	var prompt bytes.Buffer
 	start := time.Now()
-	_, err = p.DeviceLogin(context.Background(), "openid", &prompt)
+	_, err = p.DeviceLogin(context.Background(), "openid", &prompt, nil)
 	elapsed := time.Since(start)
 
 	if err == nil {
@@ -102,7 +102,7 @@ func TestDeviceLogin_ExplicitlyExcludedGrant_ClearError(t *testing.T) {
 	}
 
 	var prompt bytes.Buffer
-	_, err = p.DeviceLogin(context.Background(), "openid", &prompt)
+	_, err = p.DeviceLogin(context.Background(), "openid", &prompt, nil)
 	if err == nil {
 		t.Fatal("expected an error when grant_types_supported explicitly excludes device-code")
 	}
@@ -122,7 +122,7 @@ func TestDeviceLogin_PrivateKeyJWT_Success(t *testing.T) {
 	p.SetClientAuth(ClientAuthPrivateKeyJWT, "", key, "", jose.RS256, "")
 
 	var prompt bytes.Buffer
-	res, err := p.DeviceLogin(context.Background(), "openid offline_access", &prompt)
+	res, err := p.DeviceLogin(context.Background(), "openid offline_access", &prompt, nil)
 	if err != nil {
 		t.Fatalf("DeviceLogin: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestDeviceLogin_PrivateKeyJWT_WrongKey_Rejected(t *testing.T) {
 	p.SetClientAuth(ClientAuthPrivateKeyJWT, "", signingKey, "", jose.RS256, "")
 
 	var prompt bytes.Buffer
-	_, err = p.DeviceLogin(context.Background(), "openid", &prompt)
+	_, err = p.DeviceLogin(context.Background(), "openid", &prompt, nil)
 	if err == nil {
 		t.Fatal("expected an error for an assertion signed with the wrong key")
 	}

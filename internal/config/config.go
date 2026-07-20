@@ -8,12 +8,14 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"strings"
 
 	jose "github.com/go-jose/go-jose/v4"
 
 	"github.com/abinnovision/oidc-token-cli/internal/cache"
+	"github.com/abinnovision/oidc-token-cli/internal/grant"
 )
 
 // GrantType selects which OAuth2 grant(s) are eligible for interactive login.
@@ -105,8 +107,9 @@ type Config struct {
 	TokenStore     cache.Backend // auto|keychain|file|none, see cache.Backend
 	RedirectPort   int           // 0 = ephemeral loopback port (RFC 8252 default)
 	NonInteractive bool
-	All            bool // --all: print full JSON document instead of a bare token
-	Logout         bool // --logout: clear the cached entry and exit, no login/refresh
+	All            bool       // --all: print full JSON document instead of a bare token
+	Logout         bool       // --logout: clear the cached entry and exit, no login/refresh
+	ExtraFields    url.Values // --extra key=value pairs forwarded to the token endpoint
 
 	// ClientAuthMethod selects how the client authenticates to the token
 	// endpoint. ClientAuthNone means a public client (this tool's original,
@@ -132,11 +135,13 @@ type Config struct {
 	PrivateKey crypto.Signer
 
 	// SubjectToken is RFC 8693 §2.1's subject_token, required when
-	// GrantType == GrantTokenExchange.
+	// GrantType == GrantTokenExchange. Populated from the token-exchange
+	// grant's Bridge after Finalize.
 	SubjectToken string
 	// SubjectTokenType is RFC 8693 §3's subject_token_type; defaults to
 	// DefaultSubjectTokenType, or DefaultSubjectTokenTypeGitHubActions when
-	// SubjectTokenSource is SubjectTokenSourceGitHubActions.
+	// SubjectTokenSource is SubjectTokenSourceGitHubActions. Populated from
+	// the token-exchange grant's Bridge after Finalize.
 	SubjectTokenType string
 	// RequestedTokenType is RFC 8693 §2.1's optional requested_token_type;
 	// omitted from the request entirely when empty.
@@ -149,8 +154,10 @@ type Config struct {
 	SubjectTokenSource SubjectTokenSource
 }
 
-// fileConfig mirrors Config's JSON-file representation. Every field is a
-// pointer so "absent from the file" is distinguishable from "zero value".
+// fileConfig mirrors Config's JSON-file representation for universal fields.
+// Every field is a pointer so "absent from the file" is distinguishable from
+// "zero value". Grant-specific fields (subject_token, resource, redirect_port
+// etc.) are read from the raw map[string]any passed to each grant's Finalize.
 type fileConfig struct {
 	Issuer         *string `json:"issuer"`
 	ClientID       *string `json:"client_id"`
@@ -160,7 +167,6 @@ type fileConfig struct {
 	TokenType      *string `json:"token_type"`
 	TokenStoreDir  *string `json:"token_store_dir"`
 	TokenStore     *string `json:"token_store"`
-	RedirectPort   *int    `json:"redirect_port"`
 	NonInteractive *bool   `json:"non_interactive"`
 	All            *bool   `json:"all"`
 	Logout         *bool   `json:"logout"`
@@ -172,11 +178,7 @@ type fileConfig struct {
 	PrivateKeySigningAlg    *string `json:"private_key_alg"`
 	ClientAssertionAudience *string `json:"client_assertion_audience"`
 
-	SubjectToken       *string  `json:"subject_token"`
-	SubjectTokenType   *string  `json:"subject_token_type"`
-	RequestedTokenType *string  `json:"requested_token_type"`
-	Resources          []string `json:"resource"`
-	SubjectTokenSource *string  `json:"subject_token_source"`
+	Extra map[string]string `json:"extra"`
 }
 
 // Env is the subset of the process environment config.Parse reads from,
@@ -195,7 +197,6 @@ func (e Env) get(key string) string {
 var envKeys = struct {
 	issuer, clientID, scope, audience, grantType, tokenType, tokenStoreDir, tokenStore, nonInteractive, logout  string
 	clientAuthMethod, clientSecret, privateKeyPath, privateKeyID, privateKeySigningAlg, clientAssertionAudience string
-	subjectToken, subjectTokenType, subjectTokenSource                                                          string
 }{
 	issuer:         "OIDC_TOKEN_ISSUER",
 	clientID:       "OIDC_TOKEN_CLIENT_ID",
@@ -214,17 +215,18 @@ var envKeys = struct {
 	privateKeyID:            "OIDC_TOKEN_PRIVATE_KEY_ID",
 	privateKeySigningAlg:    "OIDC_TOKEN_PRIVATE_KEY_ALG",
 	clientAssertionAudience: "OIDC_TOKEN_CLIENT_ASSERTION_AUDIENCE",
-
-	subjectToken:       "OIDC_TOKEN_SUBJECT_TOKEN",
-	subjectTokenType:   "OIDC_TOKEN_SUBJECT_TOKEN_TYPE",
-	subjectTokenSource: "OIDC_TOKEN_SUBJECT_TOKEN_SOURCE",
 }
 
 // Parse builds a Config from, in ascending priority: defaults, environment
 // variables, an optional --config JSON file, then explicitly-set flags.
 // Flags always win; a flag the caller didn't pass on the command line never
 // overrides a value from a lower-priority source.
-func Parse(args []string, stderr io.Writer, env Env) (*Config, error) {
+//
+// Each grant in grants registers its own flags, finalizes its state after
+// parsing, and validates itself. Parse orchestrates this lifecycle and
+// copies grant-resolved values back into Config via Bridge for backward
+// compatibility.
+func Parse(args []string, stderr io.Writer, env Env, grants []grant.Grant) (*Config, error) {
 	fs := flag.NewFlagSet("oidc-token", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
@@ -244,7 +246,6 @@ func Parse(args []string, stderr io.Writer, env Env) (*Config, error) {
 		tokenType         = fs.String("token-type", string(TokenTypeAccessToken), "access_token|id_token")
 		tokenStoreDirFlag = fs.String("token-store-dir", "", "override the token store directory used by the file backend (default: $XDG_CACHE_HOME/oidc-token or ~/.cache/oidc-token)")
 		tokenStore        = fs.String("token-store", string(cache.BackendAuto), "auto|keychain|file|none: where tokens are stored; none disables persistence entirely")
-		redirectPort      = fs.Int("redirect", 0, "fixed loopback callback port for authcode; 0 selects an ephemeral port")
 		nonInteractive    = fs.Bool("non-interactive", false, "fail fast instead of opening a browser or a device-code prompt")
 		all               = fs.Bool("all", false, "print a JSON document with every available credential field instead of a bare token")
 		logout            = fs.Bool("logout", false, "clear the cached entry for --issuer/--client-id and exit, without logging in or refreshing")
@@ -257,14 +258,15 @@ func Parse(args []string, stderr io.Writer, env Env) (*Config, error) {
 		privateKeyAlg           = fs.String("private-key-alg", DefaultPrivateKeySigningAlg, "JWS signing algorithm for private_key_jwt: RS256|RS384|RS512|PS256|PS384|PS512|ES256|ES384|ES512")
 		clientAssertionAudience = fs.String("client-assertion-audience", "", "override the \"aud\" claim of the private_key_jwt assertion (default: the discovered token endpoint)")
 
-		subjectToken       = fs.String("subject-token", "", "subject_token for RFC 8693 token exchange (--grant-type=token-exchange); prefer --subject-token-file or $"+envKeys.subjectToken+" over this flag")
-		subjectTokenFile   = fs.String("subject-token-file", "", "path to a file containing the subject_token (trailing newline trimmed); takes precedence over --subject-token")
-		subjectTokenType   = fs.String("subject-token-type", "", "subject_token_type per RFC 8693 §3 (--grant-type=token-exchange); defaults to the access_token type, or the id_token type when --subject-token-source=github-actions")
-		requestedTokenType = fs.String("requested-token-type", "", "optional requested_token_type per RFC 8693 §2.1 (--grant-type=token-exchange); omitted from the request entirely when unset")
-		subjectTokenSource = fs.String("subject-token-source", string(SubjectTokenSourceManual), "auto-fetch subject_token from an external source instead of --subject-token: \"\" (manual, default) | github-actions (--grant-type=token-exchange only); mutually exclusive with --subject-token/--subject-token-file/$"+envKeys.subjectToken)
-		resources          stringSliceFlag
+		extras extraFieldsFlag
 	)
-	fs.Var(&resources, "resource", "target resource URI for RFC 8693 token exchange (--grant-type=token-exchange); repeatable for multiple resource params")
+
+	// Let each grant register its own flags before parsing.
+	for _, g := range grants {
+		g.RegisterFlags(fs)
+	}
+
+	fs.Var(&extras, "extra", "extra key=value pair forwarded to the token endpoint; repeatable")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err
@@ -276,8 +278,6 @@ func Parse(args []string, stderr io.Writer, env Env) (*Config, error) {
 		TokenType:            TokenTypeAccessToken,
 		TokenStore:           cache.BackendAuto,
 		PrivateKeySigningAlg: DefaultPrivateKeySigningAlg,
-		// SubjectTokenType is left empty here and defaulted after the
-		// subject-token source is resolved, since the default depends on it.
 	}
 
 	// 1. Environment.
@@ -329,23 +329,23 @@ func Parse(args []string, stderr io.Writer, env Env) (*Config, error) {
 	if v := env.get(envKeys.clientAssertionAudience); v != "" {
 		cfg.ClientAssertionAudience = v
 	}
-	if v := env.get(envKeys.subjectToken); v != "" {
-		cfg.SubjectToken = v
-	}
-	if v := env.get(envKeys.subjectTokenType); v != "" {
-		cfg.SubjectTokenType = v
-	}
-	if v := env.get(envKeys.subjectTokenSource); v != "" {
-		cfg.SubjectTokenSource = SubjectTokenSource(v)
-	}
 
-	// 2. Config file.
+	// 2. Config file: parse once as typed struct for universal fields and
+	// as raw map[string]any for grant-specific fields.
+	var rawFC map[string]any
 	if *configFile != "" {
-		fc, err := loadFileConfig(*configFile)
+		b, err := os.ReadFile(*configFile) //nolint:gosec // path is a user-supplied CLI flag
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("config: read config file: %w", err)
 		}
-		applyFileConfig(cfg, fc)
+		var fc fileConfig
+		if err := json.Unmarshal(b, &fc); err != nil {
+			return nil, fmt.Errorf("config: parse config file: %w", err)
+		}
+		applyFileConfig(cfg, &fc)
+		if err := json.Unmarshal(b, &rawFC); err != nil {
+			return nil, fmt.Errorf("config: parse config file: %w", err)
+		}
 	}
 
 	// 3. Explicitly-set flags only (flag.Visit skips flags left at default).
@@ -376,9 +376,6 @@ func Parse(args []string, stderr io.Writer, env Env) (*Config, error) {
 	if explicit["token-store"] {
 		cfg.TokenStore = cache.Backend(*tokenStore)
 	}
-	if explicit["redirect"] {
-		cfg.RedirectPort = *redirectPort
-	}
 	if explicit["non-interactive"] {
 		cfg.NonInteractive = *nonInteractive
 	}
@@ -406,20 +403,8 @@ func Parse(args []string, stderr io.Writer, env Env) (*Config, error) {
 	if explicit["client-assertion-audience"] {
 		cfg.ClientAssertionAudience = *clientAssertionAudience
 	}
-	if explicit["subject-token"] {
-		cfg.SubjectToken = *subjectToken
-	}
-	if explicit["subject-token-type"] {
-		cfg.SubjectTokenType = *subjectTokenType
-	}
-	if explicit["requested-token-type"] {
-		cfg.RequestedTokenType = *requestedTokenType
-	}
-	if explicit["resource"] {
-		cfg.Resources = []string(resources)
-	}
-	if explicit["subject-token-source"] {
-		cfg.SubjectTokenSource = SubjectTokenSource(*subjectTokenSource)
+	if explicit["extra"] {
+		cfg.ExtraFields = url.Values(extras)
 	}
 
 	// --client-secret-file always takes precedence over --client-secret /
@@ -433,17 +418,6 @@ func Parse(args []string, stderr io.Writer, env Env) (*Config, error) {
 		cfg.ClientSecret = strings.TrimRight(string(secret), "\n")
 	}
 
-	// --subject-token-file always takes precedence over --subject-token /
-	// OIDC_TOKEN_SUBJECT_TOKEN / the config file's subject_token, mirroring
-	// --client-secret-file's precedence above.
-	if explicit["subject-token-file"] {
-		tok, err := os.ReadFile(*subjectTokenFile)
-		if err != nil {
-			return nil, fmt.Errorf("config: read --subject-token-file: %w", err)
-		}
-		cfg.SubjectToken = strings.TrimRight(string(tok), "\n")
-	}
-
 	if cfg.TokenStoreDir == "" && cfg.TokenStore != cache.BackendNone {
 		dir, err := cache.DefaultDir(env.get)
 		if err != nil {
@@ -452,38 +426,86 @@ func Parse(args []string, stderr io.Writer, env Env) (*Config, error) {
 		cfg.TokenStoreDir = dir
 	}
 
-	// Default subject_token_type once the source is known: the GitHub Actions
-	// OIDC endpoint issues an ID token, so github-actions defaults to the
-	// id_token type; every other source keeps the generic access_token default.
-	// An explicit --subject-token-type (or env/file value) already set it here.
-	if cfg.SubjectTokenType == "" {
-		if cfg.SubjectTokenSource == SubjectTokenSourceGitHubActions {
-			cfg.SubjectTokenType = DefaultSubjectTokenTypeGitHubActions
-		} else {
-			cfg.SubjectTokenType = DefaultSubjectTokenType
+	// 4. Let each grant finalize its own flag state with the full layering
+	// context (explicit flags, env-var lookup, raw file config).
+	for _, g := range grants {
+		if err := g.Finalize(explicit, env.get, rawFC); err != nil {
+			return nil, err
 		}
 	}
 
-	if err := cfg.validate(); err != nil {
+	// 5. Validate universal config fields.
+	if err := cfg.validate(grants); err != nil {
 		return nil, err
 	}
+
+	// 6. Validate grants: the selected grant checks internal consistency;
+	// non-selected grants check that their flags weren't erroneously set.
+	for _, g := range grants {
+		if g.Name() == string(cfg.GrantType) {
+			if err := g.Validate(); err != nil {
+				return nil, err
+			}
+		} else {
+			if err := g.ValidateNotSelected(explicit); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	// 7. Copy grant-resolved values back into Config for backward compat.
+	for _, g := range grants {
+		b := g.Bridge()
+		if b.SubjectToken != "" {
+			cfg.SubjectToken = b.SubjectToken
+		}
+		if b.SubjectTokenType != "" {
+			cfg.SubjectTokenType = b.SubjectTokenType
+		}
+		if b.RequestedTokenType != "" {
+			cfg.RequestedTokenType = b.RequestedTokenType
+		}
+		if len(b.Resources) > 0 {
+			cfg.Resources = b.Resources
+		}
+		if b.SubjectTokenSource != "" {
+			cfg.SubjectTokenSource = SubjectTokenSource(b.SubjectTokenSource)
+		}
+		if b.RedirectPort != 0 {
+			cfg.RedirectPort = b.RedirectPort
+		}
+	}
+
 	if err := cfg.resolvePrivateKey(); err != nil {
 		return nil, err
 	}
 	return cfg, nil
 }
 
-func (c *Config) validate() error {
+func (c *Config) validate(grants []grant.Grant) error {
 	if c.Issuer == "" {
 		return fmt.Errorf("config: --issuer is required")
 	}
 	if c.ClientID == "" {
 		return fmt.Errorf("config: --client-id is required")
 	}
-	switch c.GrantType {
-	case GrantAuto, GrantAuthCode, GrantDeviceCode, GrantTokenExchange:
-	default:
-		return fmt.Errorf("config: invalid --grant-type %q (want auto|authcode|device-code|token-exchange)", c.GrantType)
+	// Validate --grant-type against the registered grants.
+	if c.GrantType != GrantAuto {
+		valid := false
+		for _, g := range grants {
+			if g.Name() == string(c.GrantType) {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			names := make([]string, 0, len(grants)+1)
+			names = append(names, "auto")
+			for _, g := range grants {
+				names = append(names, g.Name())
+			}
+			return fmt.Errorf("config: invalid --grant-type %q (want %s)", c.GrantType, strings.Join(names, "|"))
+		}
 	}
 	switch c.TokenType {
 	case TokenTypeAccessToken, TokenTypeIDToken:
@@ -517,40 +539,6 @@ func (c *Config) validate() error {
 			return fmt.Errorf("config: --client-secret/--private-key-file require --client-auth-method to be set")
 		}
 	}
-	switch c.SubjectTokenSource {
-	case SubjectTokenSourceManual, SubjectTokenSourceGitHubActions:
-	default:
-		return fmt.Errorf("config: invalid --subject-token-source %q (want \"\"|github-actions)", c.SubjectTokenSource)
-	}
-	if c.GrantType == GrantTokenExchange {
-		if c.SubjectTokenSource != SubjectTokenSourceManual && c.SubjectToken != "" {
-			return fmt.Errorf("config: --subject-token-source is mutually exclusive with --subject-token/--subject-token-file/$%s", envKeys.subjectToken)
-		}
-		if c.SubjectTokenSource == SubjectTokenSourceManual && c.SubjectToken == "" {
-			return fmt.Errorf("config: --grant-type=token-exchange requires --subject-token, --subject-token-file, $%s, or --subject-token-source", envKeys.subjectToken)
-		}
-		if c.SubjectTokenType == "" {
-			return fmt.Errorf("config: --subject-token-type must not be empty")
-		}
-	} else if c.SubjectToken != "" || c.RequestedTokenType != "" || len(c.Resources) > 0 || c.SubjectTokenSource != SubjectTokenSourceManual {
-		return fmt.Errorf("config: --subject-token/--subject-token-source/--resource/--requested-token-type require --grant-type=token-exchange")
-	}
-	return nil
-}
-
-// stringSliceFlag implements flag.Value for a repeatable string flag (e.g.
-// --resource), appending on every Set call.
-type stringSliceFlag []string
-
-func (s *stringSliceFlag) String() string {
-	if s == nil {
-		return ""
-	}
-	return strings.Join(*s, ",")
-}
-
-func (s *stringSliceFlag) Set(v string) error {
-	*s = append(*s, v)
 	return nil
 }
 
@@ -595,18 +583,6 @@ func (c *Config) resolvePrivateKey() error {
 	return fmt.Errorf("config: --private-key-file %q is not a supported PEM-encoded private key (want PKCS#1, PKCS#8, or EC)", c.PrivateKeyPath)
 }
 
-func loadFileConfig(path string) (*fileConfig, error) {
-	b, err := os.ReadFile(path) //nolint:gosec // path is a user-supplied CLI flag, the intended way to point this tool at a config file
-	if err != nil {
-		return nil, fmt.Errorf("config: read config file: %w", err)
-	}
-	var fc fileConfig
-	if err := json.Unmarshal(b, &fc); err != nil {
-		return nil, fmt.Errorf("config: parse config file: %w", err)
-	}
-	return &fc, nil
-}
-
 func applyFileConfig(cfg *Config, fc *fileConfig) {
 	if fc.Issuer != nil {
 		cfg.Issuer = *fc.Issuer
@@ -631,9 +607,6 @@ func applyFileConfig(cfg *Config, fc *fileConfig) {
 	}
 	if fc.TokenStore != nil {
 		cfg.TokenStore = cache.Backend(*fc.TokenStore)
-	}
-	if fc.RedirectPort != nil {
-		cfg.RedirectPort = *fc.RedirectPort
 	}
 	if fc.NonInteractive != nil {
 		cfg.NonInteractive = *fc.NonInteractive
@@ -662,19 +635,30 @@ func applyFileConfig(cfg *Config, fc *fileConfig) {
 	if fc.ClientAssertionAudience != nil {
 		cfg.ClientAssertionAudience = *fc.ClientAssertionAudience
 	}
-	if fc.SubjectToken != nil {
-		cfg.SubjectToken = *fc.SubjectToken
+	if len(fc.Extra) > 0 {
+		if cfg.ExtraFields == nil {
+			cfg.ExtraFields = url.Values{}
+		}
+		for k, v := range fc.Extra {
+			cfg.ExtraFields.Set(k, v)
+		}
 	}
-	if fc.SubjectTokenType != nil {
-		cfg.SubjectTokenType = *fc.SubjectTokenType
+}
+
+// extraFieldsFlag implements flag.Value for --extra key=value, a repeatable
+// flag that accumulates into url.Values.
+type extraFieldsFlag url.Values
+
+func (f *extraFieldsFlag) String() string { return "" }
+
+func (f *extraFieldsFlag) Set(v string) error {
+	k, val, ok := strings.Cut(v, "=")
+	if !ok {
+		return fmt.Errorf("--extra value %q must be key=value", v)
 	}
-	if fc.RequestedTokenType != nil {
-		cfg.RequestedTokenType = *fc.RequestedTokenType
+	if *f == nil {
+		*f = extraFieldsFlag(url.Values{})
 	}
-	if len(fc.Resources) > 0 {
-		cfg.Resources = fc.Resources
-	}
-	if fc.SubjectTokenSource != nil {
-		cfg.SubjectTokenSource = SubjectTokenSource(*fc.SubjectTokenSource)
-	}
+	url.Values(*f).Add(k, val)
+	return nil
 }

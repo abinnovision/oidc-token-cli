@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -44,7 +45,7 @@ func deviceAssertionLifetime(expiry time.Time) time.Duration {
 // code + user code, print the verification URL and code to prompt (stderr
 // only — never stdout), then poll the token endpoint until the user
 // completes the flow, the device code expires, or ctx is cancelled.
-func (p *Provider) DeviceLogin(ctx context.Context, scope string, prompt io.Writer) (output.Result, error) {
+func (p *Provider) DeviceLogin(ctx context.Context, scope string, prompt io.Writer, extraFields url.Values) (output.Result, error) {
 	if !p.SupportsDeviceCode() {
 		return output.Result{}, fmt.Errorf("oidc: issuer %s does not advertise device_authorization_endpoint; device-code grant unavailable (issuer advertises: %s)", p.Issuer, p.AdvertisedGrants())
 	}
@@ -91,6 +92,12 @@ func (p *Provider) DeviceLogin(ctx context.Context, scope string, prompt io.Writ
 		return output.Result{}, err
 	}
 	tokenOpts := append(append([]oauth2.AuthCodeOption{}, opts...), assertionOpts...)
+
+	for k, vs := range extraFields {
+		for _, v := range vs {
+			tokenOpts = append(tokenOpts, oauth2.SetAuthURLParam(k, v))
+		}
+	}
 
 	tok, err := cfg.DeviceAccessToken(ctx, da, tokenOpts...)
 	if err != nil {
