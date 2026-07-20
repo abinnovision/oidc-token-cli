@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 
+	"github.com/abinnovision/oidc-token-cli/internal/flagbinding"
 	"github.com/abinnovision/oidc-token-cli/internal/grant"
 	"github.com/abinnovision/oidc-token-cli/internal/output"
 )
@@ -26,9 +27,9 @@ func (g *DeviceCode) Viable(env grant.Environment, nonInteractive bool) bool {
 
 func (g *DeviceCode) RegisterFlags(_ *flag.FlagSet) {}
 
-func (g *DeviceCode) Finalize(_ map[string]bool, _ grant.EnvFunc, _ map[string]any) error {
-	return nil
-}
+func (g *DeviceCode) Fields() []flagbinding.Field { return nil }
+
+func (g *DeviceCode) Finalize(_ map[string]bool) error { return nil }
 
 func (g *DeviceCode) Validate() error                             { return nil }
 func (g *DeviceCode) ValidateNotSelected(_ map[string]bool) error { return nil }

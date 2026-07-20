@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/abinnovision/oidc-token-cli/internal/flagbinding"
 	"github.com/abinnovision/oidc-token-cli/internal/grant"
 	"github.com/abinnovision/oidc-token-cli/internal/output"
 	"github.com/abinnovision/oidc-token-cli/internal/subjecttoken"
@@ -30,13 +31,8 @@ type TokenExchange struct {
 	SubjectTokenSource string
 	Audience           string
 
-	// Private flag pointers, populated by RegisterFlags.
-	subjectToken       *string
-	subjectTokenFile   *string
-	subjectTokenType   *string
-	requestedTokenType *string
-	resources          stringSliceFlag
-	subjectTokenSource *string
+	// Private flag pointer, populated by RegisterFlags.
+	subjectTokenFile *string
 
 	sources []subjecttoken.Source
 }
@@ -57,73 +53,21 @@ func (g *TokenExchange) AutoEligible() bool { return false }
 func (g *TokenExchange) Viable(_ grant.Environment, _ bool) bool { return true }
 
 func (g *TokenExchange) RegisterFlags(fs *flag.FlagSet) {
-	g.subjectToken = fs.String("subject-token", "", "subject_token for RFC 8693 token exchange (--grant-type=token-exchange); prefer --subject-token-file or $"+envSubjectToken+" over this flag")
 	g.subjectTokenFile = fs.String("subject-token-file", "", "path to a file containing the subject_token (trailing newline trimmed); takes precedence over --subject-token")
-	g.subjectTokenType = fs.String("subject-token-type", "", "subject_token_type per RFC 8693 §3 (--grant-type=token-exchange); defaults to the access_token type, or the id_token type when --subject-token-source=github-actions")
-	g.requestedTokenType = fs.String("requested-token-type", "", "optional requested_token_type per RFC 8693 §2.1 (--grant-type=token-exchange); omitted from the request entirely when unset")
-	g.subjectTokenSource = fs.String("subject-token-source", "", "auto-fetch subject_token from an external source instead of --subject-token: \"\" (manual, default) | github-actions (--grant-type=token-exchange only); mutually exclusive with --subject-token/--subject-token-file/$"+envSubjectToken)
-	fs.Var(&g.resources, "resource", "target resource URI for RFC 8693 token exchange (--grant-type=token-exchange); repeatable for multiple resource params")
 }
 
-func (g *TokenExchange) Finalize(explicit map[string]bool, env grant.EnvFunc, fc map[string]any) error {
-	// 1. Environment variables.
-	if v := env(envSubjectToken); v != "" {
-		g.SubjectToken = v
+func (g *TokenExchange) Fields() []flagbinding.Field {
+	return []flagbinding.Field{
+		&flagbinding.StringField{Target: &g.SubjectToken, FlagName: "subject-token", EnvKey: envSubjectToken, JsonKey: "subject_token", Usage: "subject_token for RFC 8693 token exchange (--grant-type=token-exchange); prefer --subject-token-file or $" + envSubjectToken + " over this flag"},
+		&flagbinding.StringField{Target: &g.SubjectTokenType, FlagName: "subject-token-type", EnvKey: envSubjectTokenType, JsonKey: "subject_token_type", Usage: "subject_token_type per RFC 8693 §3 (--grant-type=token-exchange); defaults to the access_token type, or the id_token type when --subject-token-source=github-actions"},
+		&flagbinding.StringField{Target: &g.RequestedTokenType, FlagName: "requested-token-type", JsonKey: "requested_token_type", Usage: "optional requested_token_type per RFC 8693 §2.1 (--grant-type=token-exchange); omitted from the request entirely when unset"},
+		&flagbinding.StringField{Target: &g.SubjectTokenSource, FlagName: "subject-token-source", EnvKey: envSubjectTokenSource, JsonKey: "subject_token_source", Usage: `auto-fetch subject_token from an external source instead of --subject-token: "" (manual, default) | github-actions (--grant-type=token-exchange only); mutually exclusive with --subject-token/--subject-token-file/$` + envSubjectToken},
+		&flagbinding.StringSliceField{Target: &g.Resources, FlagName: "resource", JsonKey: "resource", Usage: "target resource URI for RFC 8693 token exchange (--grant-type=token-exchange); repeatable for multiple resource params"},
 	}
-	if v := env(envSubjectTokenType); v != "" {
-		g.SubjectTokenType = v
-	}
-	if v := env(envSubjectTokenSource); v != "" {
-		g.SubjectTokenSource = v
-	}
+}
 
-	// 2. File config (keys match the JSON config schema).
-	if fc != nil {
-		if v, ok := fc["subject_token"].(string); ok {
-			g.SubjectToken = v
-		}
-		if v, ok := fc["subject_token_type"].(string); ok {
-			g.SubjectTokenType = v
-		}
-		if v, ok := fc["subject_token_source"].(string); ok {
-			g.SubjectTokenSource = v
-		}
-		if v, ok := fc["requested_token_type"].(string); ok {
-			g.RequestedTokenType = v
-		}
-		if v, ok := fc["resource"]; ok {
-			if arr, ok := v.([]any); ok {
-				res := make([]string, 0, len(arr))
-				for _, item := range arr {
-					if s, ok := item.(string); ok {
-						res = append(res, s)
-					}
-				}
-				if len(res) > 0 {
-					g.Resources = res
-				}
-			}
-		}
-	}
-
-	// 3. Explicitly-set flags win over env and file.
-	if explicit["subject-token"] {
-		g.SubjectToken = *g.subjectToken
-	}
-	if explicit["subject-token-type"] {
-		g.SubjectTokenType = *g.subjectTokenType
-	}
-	if explicit["requested-token-type"] {
-		g.RequestedTokenType = *g.requestedTokenType
-	}
-	if explicit["resource"] {
-		g.Resources = []string(g.resources)
-	}
-	if explicit["subject-token-source"] {
-		g.SubjectTokenSource = *g.subjectTokenSource
-	}
-
-	// 4. --subject-token-file always takes precedence over --subject-token /
+func (g *TokenExchange) Finalize(explicit map[string]bool) error {
+	// --subject-token-file always takes precedence over --subject-token /
 	// env / file, mirroring --client-secret-file's precedence.
 	if explicit["subject-token-file"] {
 		tok, err := os.ReadFile(*g.subjectTokenFile)
@@ -133,7 +77,7 @@ func (g *TokenExchange) Finalize(explicit map[string]bool, env grant.EnvFunc, fc
 		g.SubjectToken = strings.TrimRight(string(tok), "\n")
 	}
 
-	// 5. Default subject_token_type once the source is known.
+	// Default subject_token_type once the source is known.
 	if g.SubjectTokenType == "" {
 		if src := subjecttoken.FindSource(g.sources, g.SubjectTokenSource); src != nil {
 			g.SubjectTokenType = src.DefaultTokenType()
@@ -195,20 +139,4 @@ func (g *TokenExchange) ResolveSubjectToken(ctx context.Context) (string, error)
 		return "", fmt.Errorf("config: unsupported --subject-token-source %q", g.SubjectTokenSource)
 	}
 	return src.Fetch(ctx, g.Audience)
-}
-
-// stringSliceFlag implements flag.Value for a repeatable string flag
-// (e.g. --resource), appending on every Set call.
-type stringSliceFlag []string
-
-func (s *stringSliceFlag) String() string {
-	if s == nil {
-		return ""
-	}
-	return strings.Join(*s, ",")
-}
-
-func (s *stringSliceFlag) Set(v string) error {
-	*s = append(*s, v)
-	return nil
 }

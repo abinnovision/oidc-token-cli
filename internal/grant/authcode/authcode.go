@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 
+	"github.com/abinnovision/oidc-token-cli/internal/flagbinding"
 	"github.com/abinnovision/oidc-token-cli/internal/grant"
 	"github.com/abinnovision/oidc-token-cli/internal/output"
 )
@@ -12,9 +13,6 @@ import (
 // RFC 7636).
 type AuthCode struct {
 	CallbackPort int
-
-	// Private flag pointer, populated by RegisterFlags.
-	redirectPort *int
 }
 
 var _ grant.Grant = (*AuthCode)(nil)
@@ -30,25 +28,15 @@ func (g *AuthCode) Viable(env grant.Environment, _ bool) bool {
 	return env.BrowserAvailable()
 }
 
-func (g *AuthCode) RegisterFlags(fs *flag.FlagSet) {
-	g.redirectPort = fs.Int("redirect", 0, "fixed loopback callback port for authcode; 0 selects an ephemeral port")
+func (g *AuthCode) RegisterFlags(_ *flag.FlagSet) {}
+
+func (g *AuthCode) Fields() []flagbinding.Field {
+	return []flagbinding.Field{
+		&flagbinding.IntField{Target: &g.CallbackPort, FlagName: "redirect", JsonKey: "redirect_port", Usage: "fixed loopback callback port for authcode; 0 selects an ephemeral port"},
+	}
 }
 
-func (g *AuthCode) Finalize(explicit map[string]bool, _ grant.EnvFunc, fc map[string]any) error {
-	// File config.
-	if fc != nil {
-		if v, ok := fc["redirect_port"]; ok {
-			if n, ok := v.(float64); ok {
-				g.CallbackPort = int(n)
-			}
-		}
-	}
-	// Explicit flag wins.
-	if explicit["redirect"] {
-		g.CallbackPort = *g.redirectPort
-	}
-	return nil
-}
+func (g *AuthCode) Finalize(_ map[string]bool) error { return nil }
 
 func (g *AuthCode) Validate() error                             { return nil }
 func (g *AuthCode) ValidateNotSelected(_ map[string]bool) error { return nil }
