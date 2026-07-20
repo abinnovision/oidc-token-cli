@@ -73,7 +73,7 @@ func TestAuthCodeLogin_Success(t *testing.T) {
 		return simulateBrowser(t, m, u, oidctest.MockAuthCode, "", "")(u)
 	}
 
-	res, err := p.AuthCodeLogin(context.Background(), "openid offline_access", 0, openBrowser, &prompt, &prompt)
+	res, err := p.AuthCodeLogin(context.Background(), "openid offline_access", 0, openBrowser, &prompt, &prompt, nil)
 	if err != nil {
 		t.Fatalf("AuthCodeLogin: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestAuthCodeLogin_NilHint_SuppressesURLText_PromptStillGetsWarnings(t *test
 	openBrowserErr := errors.New("no display")
 	openBrowser := func(string) error { return openBrowserErr }
 
-	_, _ = p.AuthCodeLogin(ctx, "openid", 0, openBrowser, &prompt, nil)
+	_, _ = p.AuthCodeLogin(ctx, "openid", 0, openBrowser, &prompt, nil, nil)
 
 	if !strings.Contains(prompt.String(), "could not open a browser") {
 		t.Fatalf("prompt = %q, want the browser-open-failure warning even with a nil hint", prompt.String())
@@ -134,7 +134,7 @@ func TestAuthCodeLogin_WrongStateAlone_NeverCompletes_TimesOut(t *testing.T) {
 	}
 
 	start := time.Now()
-	_, err = p.AuthCodeLogin(ctx, "openid", 0, openBrowser, &prompt, &prompt)
+	_, err = p.AuthCodeLogin(ctx, "openid", 0, openBrowser, &prompt, &prompt, nil)
 	elapsed := time.Since(start)
 
 	if err == nil {
@@ -158,7 +158,7 @@ func TestAuthCodeLogin_AuthorizationEndpointRejection_PreLogin(t *testing.T) {
 		return simulateBrowser(t, m, u, "", "", "unauthorized_client")(u)
 	}
 
-	_, err = p.AuthCodeLogin(context.Background(), "openid", 0, openBrowser, &prompt, &prompt)
+	_, err = p.AuthCodeLogin(context.Background(), "openid", 0, openBrowser, &prompt, &prompt, nil)
 	if err == nil {
 		t.Fatal("expected an error when the authorization endpoint rejects the client before login")
 	}
@@ -179,7 +179,7 @@ func TestAuthCodeLogin_Timeout_AbortsCleanly(t *testing.T) {
 	defer cancel()
 
 	var prompt bytes.Buffer
-	_, err = p.AuthCodeLogin(ctx, "openid", 0, nil, &prompt, &prompt)
+	_, err = p.AuthCodeLogin(ctx, "openid", 0, nil, &prompt, &prompt, nil)
 	if err == nil {
 		t.Fatal("expected a timeout error when nobody completes the callback")
 	}
@@ -201,7 +201,7 @@ func TestAuthCodeLogin_EphemeralPort_NonZero(t *testing.T) {
 	}
 
 	var prompt bytes.Buffer
-	if _, err := p.AuthCodeLogin(context.Background(), "openid", 0, openBrowser, &prompt, &prompt); err != nil {
+	if _, err := p.AuthCodeLogin(context.Background(), "openid", 0, openBrowser, &prompt, &prompt, nil); err != nil {
 		t.Fatalf("AuthCodeLogin: %v", err)
 	}
 	if gotPort == "" || gotPort == "0" {
@@ -232,7 +232,7 @@ func TestAuthCodeLogin_FixedPort_UsesExactPort(t *testing.T) {
 	}
 
 	var prompt bytes.Buffer
-	if _, err := p.AuthCodeLogin(context.Background(), "openid", fixedPort, openBrowser, &prompt, &prompt); err != nil {
+	if _, err := p.AuthCodeLogin(context.Background(), "openid", fixedPort, openBrowser, &prompt, &prompt, nil); err != nil {
 		t.Fatalf("AuthCodeLogin: %v", err)
 	}
 	if gotPort != strconv.Itoa(fixedPort) {
@@ -250,7 +250,7 @@ func TestAuthCodeLogin_NotSupported_ClearError(t *testing.T) {
 	}
 
 	var prompt bytes.Buffer
-	_, err = p.AuthCodeLogin(context.Background(), "openid", 0, nil, &prompt, &prompt)
+	_, err = p.AuthCodeLogin(context.Background(), "openid", 0, nil, &prompt, &prompt, nil)
 	if err == nil {
 		t.Fatal("expected an error when authorization_code is explicitly excluded")
 	}
@@ -266,7 +266,7 @@ func TestAuthCodeLogin_PlainOnlyPKCE_Refuses(t *testing.T) {
 	}
 
 	var prompt bytes.Buffer
-	_, err = p.AuthCodeLogin(context.Background(), "openid", 0, nil, &prompt, &prompt)
+	_, err = p.AuthCodeLogin(context.Background(), "openid", 0, nil, &prompt, &prompt, nil)
 	if err == nil {
 		t.Fatal("expected a refusal when the issuer only advertises plain PKCE")
 	}
@@ -291,7 +291,7 @@ func TestAuthCodeLogin_NonceMismatch_RecordsIDTokenError_NotHardFailure(t *testi
 		return fn
 	}
 
-	res, err := p.AuthCodeLogin(context.Background(), "openid", 0, openBrowser, &prompt, &prompt)
+	res, err := p.AuthCodeLogin(context.Background(), "openid", 0, openBrowser, &prompt, &prompt, nil)
 	if err != nil {
 		t.Fatalf("AuthCodeLogin must not hard-fail on nonce mismatch, got: %v", err)
 	}
@@ -327,7 +327,7 @@ func TestAuthCodeLogin_PrivateKeyJWT_Success(t *testing.T) {
 		return simulateBrowser(t, m, u, oidctest.MockAuthCode, "", "")(u)
 	}
 
-	res, err := p.AuthCodeLogin(context.Background(), "openid offline_access", 0, openBrowser, &prompt, &prompt)
+	res, err := p.AuthCodeLogin(context.Background(), "openid offline_access", 0, openBrowser, &prompt, &prompt, nil)
 	if err != nil {
 		t.Fatalf("AuthCodeLogin: %v", err)
 	}
@@ -360,7 +360,7 @@ func TestAuthCodeLogin_PrivateKeyJWT_WrongKey_Rejected(t *testing.T) {
 
 	_, err = p.AuthCodeLogin(context.Background(), "openid", 0, func(u string) error {
 		return openBrowser(u)
-	}, &prompt, &prompt)
+	}, &prompt, &prompt, nil)
 	if err == nil {
 		t.Fatal("expected an error for an assertion signed with the wrong key")
 	}

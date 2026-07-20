@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/url"
 	"time"
 
 	upstream "github.com/coreos/go-oidc/v3/oidc"
@@ -29,7 +30,7 @@ const authCodeTimeout = 5 * time.Minute
 // openBrowser, if non-nil, is invoked with the authorization URL. prompt
 // receives warnings (e.g. the browser failing to open); hint receives the
 // "visit this URL" fallback text and is nil when nobody is at the terminal.
-func (p *Provider) AuthCodeLogin(ctx context.Context, scope string, port int, openBrowser func(url string) error, prompt, hint io.Writer) (output.Result, error) {
+func (p *Provider) AuthCodeLogin(ctx context.Context, scope string, port int, openBrowser func(u string) error, prompt, hint io.Writer, extraFields url.Values) (output.Result, error) {
 	if !p.SupportsGrant("authorization_code") {
 		return output.Result{}, fmt.Errorf("oidc: issuer %s does not support the authorization_code grant (issuer advertises: %s)", p.Issuer, p.AdvertisedGrants())
 	}
@@ -102,6 +103,12 @@ func (p *Provider) AuthCodeLogin(ctx context.Context, scope string, port int, op
 		return output.Result{}, err
 	}
 	exchangeOpts = append(exchangeOpts, assertionOpts...)
+
+	for k, vs := range extraFields {
+		for _, v := range vs {
+			exchangeOpts = append(exchangeOpts, oauth2.SetAuthURLParam(k, v))
+		}
+	}
 
 	tok, err := cfg.Exchange(ctx, code, exchangeOpts...)
 	if err != nil {

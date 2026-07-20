@@ -5,6 +5,7 @@ import (
 	"crypto"
 	"errors"
 	"io"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -57,7 +58,7 @@ func (f *fakeProvider) AdvertisedGrants() string { return "fake-provider-grants"
 func (f *fakeProvider) SetClientAuth(oidc.ClientAuthMethod, string, crypto.Signer, string, jose.SignatureAlgorithm, string) {
 }
 
-func (f *fakeProvider) DeviceLogin(ctx context.Context, scope string, prompt io.Writer) (output.Result, error) {
+func (f *fakeProvider) DeviceLogin(ctx context.Context, scope string, prompt io.Writer, _ url.Values) (output.Result, error) {
 	f.deviceCalls++
 	if f.deviceErr != nil {
 		return output.Result{}, f.deviceErr
@@ -65,7 +66,7 @@ func (f *fakeProvider) DeviceLogin(ctx context.Context, scope string, prompt io.
 	return f.loginResult, nil
 }
 
-func (f *fakeProvider) AuthCodeLogin(ctx context.Context, scope string, port int, openBrowser func(string) error, prompt, hint io.Writer) (output.Result, error) {
+func (f *fakeProvider) AuthCodeLogin(ctx context.Context, scope string, port int, openBrowser func(string) error, prompt, hint io.Writer, _ url.Values) (output.Result, error) {
 	f.authcodeCalls++
 	f.lastHintNonNil = hint != nil
 	if hint != nil {
@@ -84,7 +85,7 @@ func (f *fakeProvider) Refresh(ctx context.Context, scope, refreshToken string) 
 	return f.loginResult, nil
 }
 
-func (f *fakeProvider) TokenExchange(ctx context.Context, scope, subjectToken, subjectTokenType, requestedTokenType string, resources []string) (output.Result, error) {
+func (f *fakeProvider) TokenExchange(ctx context.Context, scope, subjectToken, subjectTokenType, requestedTokenType string, resources []string, _ url.Values) (output.Result, error) {
 	f.lastTokenExchangeSubjectToken = subjectToken
 	f.lastTokenExchangeSubjectTokenType = subjectTokenType
 	f.lastTokenExchangeRequestedType = requestedTokenType

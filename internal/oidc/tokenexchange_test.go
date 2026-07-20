@@ -21,7 +21,7 @@ func TestTokenExchange_Success_ReturnsAccessToken(t *testing.T) {
 		t.Fatalf("Discover: %v", err)
 	}
 
-	res, err := p.TokenExchange(context.Background(), "openid", "subject-token-value", testSubjectTokenType, "", nil)
+	res, err := p.TokenExchange(context.Background(), "openid", "subject-token-value", testSubjectTokenType, "", nil, nil)
 	if err != nil {
 		t.Fatalf("TokenExchange: %v", err)
 	}
@@ -39,7 +39,7 @@ func TestTokenExchange_IncludesIssuedTokenType(t *testing.T) {
 		t.Fatalf("Discover: %v", err)
 	}
 
-	res, err := p.TokenExchange(context.Background(), "", "subject-token-value", testSubjectTokenType, "", nil)
+	res, err := p.TokenExchange(context.Background(), "", "subject-token-value", testSubjectTokenType, "", nil, nil)
 	if err != nil {
 		t.Fatalf("TokenExchange: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestTokenExchange_ClientSecretBasic_Success(t *testing.T) {
 	}
 	p.SetClientAuth(ClientAuthSecretBasic, "s3cr3t", nil, "", "", "")
 
-	res, err := p.TokenExchange(context.Background(), "", "subject-token-value", testSubjectTokenType, "", nil)
+	res, err := p.TokenExchange(context.Background(), "", "subject-token-value", testSubjectTokenType, "", nil, nil)
 	if err != nil {
 		t.Fatalf("TokenExchange: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestTokenExchange_ClientSecretPost_Success(t *testing.T) {
 	}
 	p.SetClientAuth(ClientAuthSecretPost, "s3cr3t", nil, "", "", "")
 
-	res, err := p.TokenExchange(context.Background(), "", "subject-token-value", testSubjectTokenType, "", nil)
+	res, err := p.TokenExchange(context.Background(), "", "subject-token-value", testSubjectTokenType, "", nil, nil)
 	if err != nil {
 		t.Fatalf("TokenExchange: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestTokenExchange_PrivateKeyJWT_Success(t *testing.T) {
 	}
 	p.SetClientAuth(ClientAuthPrivateKeyJWT, "", key, "", jose.RS256, "")
 
-	res, err := p.TokenExchange(context.Background(), "", "subject-token-value", testSubjectTokenType, "", nil)
+	res, err := p.TokenExchange(context.Background(), "", "subject-token-value", testSubjectTokenType, "", nil, nil)
 	if err != nil {
 		t.Fatalf("TokenExchange: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestTokenExchange_PrivateKeyJWT_WrongKey_Rejected(t *testing.T) {
 	}
 	p.SetClientAuth(ClientAuthPrivateKeyJWT, "", signingKey, "", jose.RS256, "")
 
-	_, err = p.TokenExchange(context.Background(), "", "subject-token-value", testSubjectTokenType, "", nil)
+	_, err = p.TokenExchange(context.Background(), "", "subject-token-value", testSubjectTokenType, "", nil, nil)
 	if err == nil {
 		t.Fatal("expected an error for an assertion signed with the wrong key")
 	}
@@ -144,7 +144,7 @@ func TestTokenExchange_SendsAudienceWhenSet(t *testing.T) {
 	}
 	p.SetAudience("https://api.example/")
 
-	if _, err := p.TokenExchange(context.Background(), "", "subject-token-value", testSubjectTokenType, "", nil); err != nil {
+	if _, err := p.TokenExchange(context.Background(), "", "subject-token-value", testSubjectTokenType, "", nil, nil); err != nil {
 		t.Fatalf("TokenExchange: %v", err)
 	}
 	if got := m.LastTokenExchangeRequest().Get("audience"); got != "https://api.example/" {
@@ -160,7 +160,7 @@ func TestTokenExchange_OmitsAudienceWhenUnset(t *testing.T) {
 		t.Fatalf("Discover: %v", err)
 	}
 
-	if _, err := p.TokenExchange(context.Background(), "", "subject-token-value", testSubjectTokenType, "", nil); err != nil {
+	if _, err := p.TokenExchange(context.Background(), "", "subject-token-value", testSubjectTokenType, "", nil, nil); err != nil {
 		t.Fatalf("TokenExchange: %v", err)
 	}
 	if _, ok := m.LastTokenExchangeRequest()["audience"]; ok {
@@ -176,7 +176,7 @@ func TestTokenExchange_OmitsRequestedTokenTypeWhenUnset(t *testing.T) {
 		t.Fatalf("Discover: %v", err)
 	}
 
-	if _, err := p.TokenExchange(context.Background(), "", "subject-token-value", testSubjectTokenType, "", nil); err != nil {
+	if _, err := p.TokenExchange(context.Background(), "", "subject-token-value", testSubjectTokenType, "", nil, nil); err != nil {
 		t.Fatalf("TokenExchange: %v", err)
 	}
 	if _, ok := m.LastTokenExchangeRequest()["requested_token_type"]; ok {
@@ -193,7 +193,7 @@ func TestTokenExchange_SendsMultipleResourceParams(t *testing.T) {
 	}
 
 	resources := []string{"https://a.example/", "https://b.example/"}
-	if _, err := p.TokenExchange(context.Background(), "", "subject-token-value", testSubjectTokenType, "", resources); err != nil {
+	if _, err := p.TokenExchange(context.Background(), "", "subject-token-value", testSubjectTokenType, "", resources, nil); err != nil {
 		t.Fatalf("TokenExchange: %v", err)
 	}
 	got := m.LastTokenExchangeRequest()["resource"]
@@ -211,7 +211,7 @@ func TestTokenExchange_InvalidGrant_Errors(t *testing.T) {
 		t.Fatalf("Discover: %v", err)
 	}
 
-	_, err = p.TokenExchange(context.Background(), "", "subject-token-value", testSubjectTokenType, "", nil)
+	_, err = p.TokenExchange(context.Background(), "", "subject-token-value", testSubjectTokenType, "", nil, nil)
 	if err == nil {
 		t.Fatal("expected an error when the issuer rejects the subject token")
 	}
