@@ -20,7 +20,7 @@ type flagGroup struct {
 // silently disappear from --help.
 var groups = []flagGroup{
 	{Title: "Common", Flags: []string{"issuer", "client-id", "scope", "audience", "grant-type", "token-type", "config"}},
-	{Title: "Output", Flags: []string{"all", "logout", "non-interactive"}},
+	{Title: "Output", Flags: []string{"format", "all", "logout", "non-interactive"}},
 	{Title: "Token Storage", Flags: []string{"token-store", "token-store-dir"}},
 	{Title: "Advanced - Client Authentication", Flags: []string{"client-auth-method", "client-secret", "client-secret-file", "private-key-file", "private-key-id", "private-key-alg", "client-assertion-audience"}},
 	{Title: "Advanced - Token Exchange (--grant-type=token-exchange)", Flags: []string{"subject-token", "subject-token-file", "subject-token-type", "subject-token-source", "requested-token-type", "resource"}},

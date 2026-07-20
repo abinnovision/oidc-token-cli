@@ -133,6 +133,39 @@ func TestRun_Success_All_ValidJSON(t *testing.T) {
 	}
 }
 
+func TestRun_Success_ExecCredential_ValidJSON(t *testing.T) {
+	dir := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	code := run([]string{
+		"--issuer=https://issuer.example", "--client-id=cid", "--format=exec-credential",
+		"--token-store-dir=" + filepath.Join(dir, "cache"), "--token-store=file",
+	}, &stdout, &stderr, func(cfg *config.Config) runner.TokenSource {
+		return fakeSource{loginResult: output.Result{AccessToken: "at", IDToken: "it", RefreshToken: "rt"}}
+	}, failTokenExchange(t))
+
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr.String())
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &doc); err != nil {
+		t.Fatalf("--format=exec-credential stdout is not valid JSON: %v, raw: %s", err, stdout.String())
+	}
+	if _, ok := doc["apiVersion"]; !ok {
+		t.Fatalf("expected apiVersion in output, got %v", doc)
+	}
+	if doc["kind"] != "ExecCredential" {
+		t.Fatalf("kind = %v, want ExecCredential", doc["kind"])
+	}
+	status, ok := doc["status"].(map[string]any)
+	if !ok {
+		t.Fatalf("status is not an object: %v", doc["status"])
+	}
+	if token, _ := status["token"].(string); token == "" {
+		t.Fatalf("status.token must be non-empty, got %v", status["token"])
+	}
+}
+
 func TestRun_LoginFailure_ExitNonZero_EmptyStdout_NonEmptyStderr(t *testing.T) {
 	dir := t.TempDir()
 	var stdout, stderr bytes.Buffer

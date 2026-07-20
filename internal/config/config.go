@@ -37,6 +37,15 @@ const (
 	TokenTypeIDToken     TokenType = "id_token"
 )
 
+// OutputFormat selects how the final result is written to stdout.
+type OutputFormat string
+
+const (
+	OutputFormatToken          OutputFormat = "token"
+	OutputFormatJSON           OutputFormat = "json"
+	OutputFormatExecCredential OutputFormat = "exec-credential"
+)
+
 // ClientAuthMethod selects how the client authenticates itself to the token
 // endpoint. ClientAuthNone (the default) is a public client: no secret, no
 // assertion, identical to this tool's original behavior.
@@ -108,9 +117,10 @@ type Config struct {
 	TokenStore     cache.Backend // auto|keychain|file|none, see cache.Backend
 	RedirectPort   int           // 0 = ephemeral loopback port (RFC 8252 default)
 	NonInteractive bool
-	All            bool       // --all: print full JSON document instead of a bare token
-	Logout         bool       // --logout: clear the cached entry and exit, no login/refresh
-	ExtraFields    url.Values // --extra key=value pairs forwarded to the token endpoint
+	Format         OutputFormat // --format: token|json|exec-credential, see OutputFormat
+	All            bool         // --all: print full JSON document instead of a bare token (deprecated: use --format=json)
+	Logout         bool         // --logout: clear the cached entry and exit, no login/refresh
+	ExtraFields    url.Values   // --extra key=value pairs forwarded to the token endpoint
 
 	// ClientAuthMethod selects how the client authenticates to the token
 	// endpoint. ClientAuthNone means a public client (this tool's original,
@@ -199,6 +209,7 @@ func Parse(args []string, stderr io.Writer, env Env, grants []grant.Grant) (*Con
 		grantTypeStr  = string(GrantAuto)
 		tokenTypeStr  = string(TokenTypeAccessToken)
 		tokenStoreStr = string(cache.BackendAuto)
+		formatStr     = string(OutputFormatToken)
 		clientAuthStr string
 	)
 
@@ -214,7 +225,8 @@ func Parse(args []string, stderr io.Writer, env Env, grants []grant.Grant) (*Con
 		&flagbinding.StringField{Target: &cfg.TokenStoreDir, FlagName: "token-store-dir", EnvKey: "OIDC_TOKEN_STORE_DIR", JsonKey: "token_store_dir", Usage: "token store directory for the file backend"},
 		&flagbinding.StringField{Target: &tokenStoreStr, FlagName: "token-store", EnvKey: "OIDC_TOKEN_STORE", JsonKey: "token_store", Usage: "auto|keychain|file|none", Def: string(cache.BackendAuto)},
 		&flagbinding.BoolField{Target: &cfg.NonInteractive, FlagName: "non-interactive", EnvKey: "OIDC_TOKEN_NON_INTERACTIVE", JsonKey: "non_interactive", Usage: "disable browser and device-code prompts"},
-		&flagbinding.BoolField{Target: &cfg.All, FlagName: "all", JsonKey: "all", Usage: "print full JSON token response"},
+		&flagbinding.StringField{Target: &formatStr, FlagName: "format", EnvKey: "OIDC_TOKEN_FORMAT", JsonKey: "format", Usage: "token|json|exec-credential", Def: string(OutputFormatToken)},
+		&flagbinding.BoolField{Target: &cfg.All, FlagName: "all", JsonKey: "all", Usage: "print full JSON token response (deprecated: use --format=json)"},
 		&flagbinding.BoolField{Target: &cfg.Logout, FlagName: "logout", EnvKey: "OIDC_TOKEN_LOGOUT", JsonKey: "logout", Usage: "clear cached tokens and exit"},
 		&flagbinding.StringField{Target: &clientAuthStr, FlagName: "client-auth-method", EnvKey: "OIDC_TOKEN_CLIENT_AUTH_METHOD", JsonKey: "client_auth_method", Usage: "client_secret_basic|client_secret_post|private_key_jwt"},
 		&flagbinding.StringField{Target: &cfg.ClientSecret, FlagName: "client-secret", EnvKey: "OIDC_TOKEN_CLIENT_SECRET", JsonKey: "client_secret", Usage: "client secret for client_secret_basic or client_secret_post"},
@@ -275,6 +287,10 @@ func Parse(args []string, stderr io.Writer, env Env, grants []grant.Grant) (*Con
 	cfg.TokenType = TokenType(tokenTypeStr)
 	cfg.TokenStore = cache.Backend(tokenStoreStr)
 	cfg.ClientAuthMethod = ClientAuthMethod(clientAuthStr)
+	cfg.Format = OutputFormat(formatStr)
+	if !explicit["format"] && cfg.All {
+		cfg.Format = OutputFormatJSON
+	}
 
 	// 5. Special-case overrides not covered by the table.
 	if explicit["extra"] {
@@ -397,6 +413,11 @@ func (c *Config) validate(grants []grant.Grant) error {
 	case TokenTypeAccessToken, TokenTypeIDToken:
 	default:
 		return fmt.Errorf("config: invalid --token-type %q (want access_token|id_token)", c.TokenType)
+	}
+	switch c.Format {
+	case OutputFormatToken, OutputFormatJSON, OutputFormatExecCredential:
+	default:
+		return fmt.Errorf("config: invalid --format %q (want token|json|exec-credential)", c.Format)
 	}
 	switch c.TokenStore {
 	case cache.BackendAuto, cache.BackendKeychain, cache.BackendFile, cache.BackendNone:
