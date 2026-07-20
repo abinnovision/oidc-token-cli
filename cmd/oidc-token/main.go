@@ -24,10 +24,11 @@ import (
 	granttokenexchange "github.com/abinnovision/oidc-token-cli/internal/grant/tokenexchange"
 	"github.com/abinnovision/oidc-token-cli/internal/output"
 	"github.com/abinnovision/oidc-token-cli/internal/runner"
+	"github.com/abinnovision/oidc-token-cli/internal/subjecttoken"
 )
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr, newRealSource, newRealTokenExchangeSource, resolveRealSubjectToken))
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr, newRealSource, newRealTokenExchangeSource))
 }
 
 // newSourceFunc builds the network-facing TokenSource for a resolved
@@ -44,13 +45,6 @@ type tokenExchanger interface {
 // newTokenExchangeFunc builds the network-facing tokenExchanger for a
 // resolved config; tests inject a fake in its place.
 type newTokenExchangeFunc func(cfg *config.Config) tokenExchanger
-
-// resolveSubjectTokenFunc resolves cfg's effective subject_token for
-// --grant-type=token-exchange when cfg.SubjectTokenSource is non-manual;
-// tests inject a fake in its place. Called only when
-// cfg.SubjectTokenSource != config.SubjectTokenSourceManual -- the manual
-// path uses cfg.SubjectToken directly and never calls this.
-type resolveSubjectTokenFunc func(ctx context.Context, cfg *config.Config) (string, error)
 
 // buildStore constructs the cache.Store selected by cfg.TokenStore.
 // --token-store=keychain probes the keychain up front and fails fast with a
@@ -80,11 +74,15 @@ func buildStore(ctx context.Context, cfg *config.Config, stderr io.Writer) (cach
 // run is main's testable core. Every write to stdout happens in exactly one
 // place, guarded by err == nil, so a bug elsewhere cannot leak a partial or
 // empty token onto stdout with a zero exit code.
-func run(args []string, stdout, stderr io.Writer, newSource newSourceFunc, newTokenExchange newTokenExchangeFunc, resolveSubjectToken resolveSubjectTokenFunc) int {
+func run(args []string, stdout, stderr io.Writer, newSource newSourceFunc, newTokenExchange newTokenExchangeFunc) int {
+	sources := []subjecttoken.Source{
+		&subjecttoken.GitHubActions{Getenv: os.Getenv},
+	}
+	te := granttokenexchange.New(sources)
 	grants := []grant.Grant{
 		grantauthcode.New(),
 		grantdevicecode.New(),
-		granttokenexchange.New(),
+		te,
 	}
 	cfg, err := config.Parse(args, stderr, config.Env{Getenv: os.Getenv}, grants)
 	if err != nil {
@@ -96,6 +94,7 @@ func run(args []string, stdout, stderr io.Writer, newSource newSourceFunc, newTo
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	te.Audience = cfg.Audience
 
 	ctx := context.Background()
 
@@ -104,14 +103,10 @@ func run(args []string, stdout, stderr io.Writer, newSource newSourceFunc, newTo
 	// buildStore entirely -- unlike --logout, which still needs a store to
 	// delete an entry from.
 	if cfg.GrantType == config.GrantTokenExchange {
-		subjectToken := cfg.SubjectToken
-		if cfg.SubjectTokenSource != config.SubjectTokenSourceManual {
-			var err error
-			subjectToken, err = resolveSubjectToken(ctx, cfg)
-			if err != nil {
-				fmt.Fprintln(stderr, "error:", err)
-				return 1
-			}
+		subjectToken, err := te.ResolveSubjectToken(ctx)
+		if err != nil {
+			fmt.Fprintln(stderr, "error:", err)
+			return 1
 		}
 		result, err := newTokenExchange(cfg).TokenExchange(ctx, subjectToken, cfg.SubjectTokenType, cfg.RequestedTokenType, cfg.Resources)
 		if err != nil {

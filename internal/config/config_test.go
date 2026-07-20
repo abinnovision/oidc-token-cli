@@ -16,6 +16,7 @@ import (
 	"github.com/abinnovision/oidc-token-cli/internal/grant/authcode"
 	"github.com/abinnovision/oidc-token-cli/internal/grant/devicecode"
 	"github.com/abinnovision/oidc-token-cli/internal/grant/tokenexchange"
+	"github.com/abinnovision/oidc-token-cli/internal/subjecttoken"
 )
 
 // writeTestPrivateKeyPEM generates an RSA key, PEM-encodes it as PKCS#8, and
@@ -39,7 +40,10 @@ func writeTestPrivateKeyPEM(t *testing.T) string {
 }
 
 func testGrants() []grant.Grant {
-	return []grant.Grant{authcode.New(), devicecode.New(), tokenexchange.New()}
+	sources := []subjecttoken.Source{
+		&subjecttoken.GitHubActions{Getenv: func(string) string { return "" }},
+	}
+	return []grant.Grant{authcode.New(), devicecode.New(), tokenexchange.New(sources)}
 }
 
 func noEnv(string) string { return "" }

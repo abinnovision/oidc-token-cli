@@ -14,6 +14,10 @@ import (
 // wedged runner (or a broken proxy) can never hang the caller forever.
 const defaultHTTPTimeout = 15 * time.Second
 
+// DefaultTokenTypeGitHubActions is the RFC 8693 token-type URN for the
+// id_token GitHub Actions' native OIDC provider issues.
+const DefaultTokenTypeGitHubActions = "urn:ietf:params:oauth:token-type:id_token" //nolint:gosec // RFC 8693 token-type URN, not a credential
+
 var defaultHTTPClient = &http.Client{Timeout: defaultHTTPTimeout}
 
 // maxResponseBytes bounds how much of the token response body is read, so a
@@ -88,3 +92,22 @@ func FetchGitHubActions(ctx context.Context, getenv func(string) string, audienc
 
 	return parsed.Value, nil
 }
+
+// GitHubActions implements Source using GitHub Actions' native OIDC
+// provider.
+type GitHubActions struct {
+	Getenv     func(string) string
+	HTTPClient *http.Client
+}
+
+func (g *GitHubActions) Name() string { return "github-actions" }
+
+func (g *GitHubActions) DefaultTokenType() string {
+	return DefaultTokenTypeGitHubActions
+}
+
+func (g *GitHubActions) Fetch(ctx context.Context, audience string) (string, error) {
+	return FetchGitHubActions(ctx, g.Getenv, audience, g.HTTPClient)
+}
+
+var _ Source = (*GitHubActions)(nil)
