@@ -118,5 +118,9 @@ func isZeroValue(f *flag.Flag, value string) bool {
 	} else {
 		z = reflect.New(typ).Elem()
 	}
-	return value == z.Interface().(flag.Value).String()
+	zv, ok := z.Interface().(flag.Value)
+	if !ok {
+		return false
+	}
+	return value == zv.String()
 }
