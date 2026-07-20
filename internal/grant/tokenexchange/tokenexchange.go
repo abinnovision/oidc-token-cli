@@ -13,11 +13,11 @@ import (
 
 // Token-type URNs from RFC 8693 used as defaults for subject_token_type.
 const (
-	defaultSubjectTokenType              = "urn:ietf:params:oauth:token-type:access_token"              //nolint:gosec // RFC 8693 token-type URN, not a credential
-	defaultSubjectTokenTypeGitHubActions = "urn:ietf:params:oauth:token-type:id_token"                  //nolint:gosec // RFC 8693 token-type URN, not a credential
-	envSubjectToken                      = "OIDC_TOKEN_SUBJECT_TOKEN"                                   //nolint:gosec // env-var name, not a credential
-	envSubjectTokenType                  = "OIDC_TOKEN_SUBJECT_TOKEN_TYPE"                              //nolint:gosec // env-var name, not a credential
-	envSubjectTokenSource                = "OIDC_TOKEN_SUBJECT_TOKEN_SOURCE"                             //nolint:gosec // env-var name, not a credential
+	defaultSubjectTokenType              = "urn:ietf:params:oauth:token-type:access_token" //nolint:gosec // RFC 8693 token-type URN, not a credential
+	defaultSubjectTokenTypeGitHubActions = "urn:ietf:params:oauth:token-type:id_token"     //nolint:gosec // RFC 8693 token-type URN, not a credential
+	envSubjectToken                      = "OIDC_TOKEN_SUBJECT_TOKEN"                      //nolint:gosec // env-var name, not a credential
+	envSubjectTokenType                  = "OIDC_TOKEN_SUBJECT_TOKEN_TYPE"                 //nolint:gosec // env-var name, not a credential
+	envSubjectTokenSource                = "OIDC_TOKEN_SUBJECT_TOKEN_SOURCE"               //nolint:gosec // env-var name, not a credential
 )
 
 // TokenExchange implements the RFC 8693 token exchange grant.

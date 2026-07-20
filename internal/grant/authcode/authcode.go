@@ -21,7 +21,7 @@ var _ grant.Grant = (*AuthCode)(nil)
 
 func New() *AuthCode { return &AuthCode{} }
 
-func (g *AuthCode) Name() string      { return "authcode" }
+func (g *AuthCode) Name() string       { return "authcode" }
 func (g *AuthCode) WireGrant() string  { return "authorization_code" }
 func (g *AuthCode) Cacheable() bool    { return true }
 func (g *AuthCode) AutoEligible() bool { return true }

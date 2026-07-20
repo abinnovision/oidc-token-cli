@@ -15,7 +15,7 @@ var _ grant.Grant = (*DeviceCode)(nil)
 
 func New() *DeviceCode { return &DeviceCode{} }
 
-func (g *DeviceCode) Name() string      { return "device-code" }
+func (g *DeviceCode) Name() string       { return "device-code" }
 func (g *DeviceCode) WireGrant() string  { return "urn:ietf:params:oauth:grant-type:device_code" }
 func (g *DeviceCode) Cacheable() bool    { return true }
 func (g *DeviceCode) AutoEligible() bool { return true }
