@@ -43,7 +43,7 @@ type OutputFormat string
 const (
 	OutputFormatToken          OutputFormat = "token"
 	OutputFormatJSON           OutputFormat = "json"
-	OutputFormatExecCredential OutputFormat = "exec-credential"
+	OutputFormatExecCredential OutputFormat = "exec-credential" //nolint:gosec // G101 false positive: k8s output-format name, not a credential
 )
 
 // ClientAuthMethod selects how the client authenticates itself to the token
