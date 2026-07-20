@@ -15,6 +15,7 @@ import (
 	jose "github.com/go-jose/go-jose/v4"
 
 	"github.com/abinnovision/oidc-token-cli/internal/cache"
+	"github.com/abinnovision/oidc-token-cli/internal/flagbinding"
 	"github.com/abinnovision/oidc-token-cli/internal/grant"
 )
 
@@ -204,24 +205,30 @@ func Parse(args []string, stderr io.Writer, env Env, grants []grant.Grant) (*Con
 
 	// The binding table: one entry per universal config field, four layers,
 	// zero per-field boilerplate.
-	fields := []field{
-		&stringField{target: &cfg.Issuer, flagName: "issuer", envKey: "OIDC_TOKEN_ISSUER", jsonKey: "issuer", usage: "OIDC issuer URL (discovery is fetched from <issuer>/.well-known/openid-configuration)"},
-		&stringField{target: &cfg.ClientID, flagName: "client-id", envKey: "OIDC_TOKEN_CLIENT_ID", jsonKey: "client_id", usage: "OAuth2/OIDC client ID"},
-		&stringField{target: &cfg.Scope, flagName: "scope", envKey: "OIDC_TOKEN_SCOPE", jsonKey: "scope", usage: "space-separated OAuth2 scopes to request", def: DefaultScope},
-		&stringField{target: &cfg.Audience, flagName: "audience", envKey: "OIDC_TOKEN_AUDIENCE", jsonKey: "audience", usage: "expected audience (aud) claim; required whenever the relying party checks it"},
-		&stringField{target: &grantTypeStr, flagName: "grant-type", envKey: "OIDC_TOKEN_GRANT_TYPE", jsonKey: "grant_type", usage: "auto|authcode|device-code|token-exchange", def: string(GrantAuto)},
-		&stringField{target: &tokenTypeStr, flagName: "token-type", envKey: "OIDC_TOKEN_TOKEN_TYPE", jsonKey: "token_type", usage: "access_token|id_token", def: string(TokenTypeAccessToken)},
-		&stringField{target: &cfg.TokenStoreDir, flagName: "token-store-dir", envKey: "OIDC_TOKEN_STORE_DIR", jsonKey: "token_store_dir", usage: "override the token store directory used by the file backend (default: $XDG_CACHE_HOME/oidc-token or ~/.cache/oidc-token)"},
-		&stringField{target: &tokenStoreStr, flagName: "token-store", envKey: "OIDC_TOKEN_STORE", jsonKey: "token_store", usage: "auto|keychain|file|none: where tokens are stored; none disables persistence entirely", def: string(cache.BackendAuto)},
-		&boolField{target: &cfg.NonInteractive, flagName: "non-interactive", envKey: "OIDC_TOKEN_NON_INTERACTIVE", jsonKey: "non_interactive", usage: "fail fast instead of opening a browser or a device-code prompt"},
-		&boolField{target: &cfg.All, flagName: "all", jsonKey: "all", usage: "print a JSON document with every available credential field instead of a bare token"},
-		&boolField{target: &cfg.Logout, flagName: "logout", envKey: "OIDC_TOKEN_LOGOUT", jsonKey: "logout", usage: "clear the cached entry for --issuer/--client-id and exit, without logging in or refreshing"},
-		&stringField{target: &clientAuthStr, flagName: "client-auth-method", envKey: "OIDC_TOKEN_CLIENT_AUTH_METHOD", jsonKey: "client_auth_method", usage: "client authentication method for the token endpoint: \"\"|client_secret_basic|client_secret_post|private_key_jwt"},
-		&stringField{target: &cfg.ClientSecret, flagName: "client-secret", envKey: "OIDC_TOKEN_CLIENT_SECRET", jsonKey: "client_secret", usage: "client secret for client_secret_basic/client_secret_post (prefer --client-secret-file or $OIDC_TOKEN_CLIENT_SECRET over this flag)"},
-		&stringField{target: &cfg.PrivateKeyPath, flagName: "private-key-file", envKey: "OIDC_TOKEN_PRIVATE_KEY_FILE", jsonKey: "private_key_file", usage: "PEM file (PKCS#1/PKCS#8/EC) used to sign the private_key_jwt client assertion"},
-		&stringField{target: &cfg.PrivateKeyID, flagName: "private-key-id", envKey: "OIDC_TOKEN_PRIVATE_KEY_ID", jsonKey: "private_key_id", usage: "optional \"kid\" header on the private_key_jwt client assertion"},
-		&stringField{target: &cfg.PrivateKeySigningAlg, flagName: "private-key-alg", envKey: "OIDC_TOKEN_PRIVATE_KEY_ALG", jsonKey: "private_key_alg", usage: "JWS signing algorithm for private_key_jwt: RS256|RS384|RS512|PS256|PS384|PS512|ES256|ES384|ES512", def: DefaultPrivateKeySigningAlg},
-		&stringField{target: &cfg.ClientAssertionAudience, flagName: "client-assertion-audience", envKey: "OIDC_TOKEN_CLIENT_ASSERTION_AUDIENCE", jsonKey: "client_assertion_audience", usage: "override the \"aud\" claim of the private_key_jwt assertion (default: the discovered token endpoint)"},
+	fields := []flagbinding.Field{
+		&flagbinding.StringField{Target: &cfg.Issuer, FlagName: "issuer", EnvKey: "OIDC_TOKEN_ISSUER", JsonKey: "issuer", Usage: "OIDC issuer URL (discovery is fetched from <issuer>/.well-known/openid-configuration)"},
+		&flagbinding.StringField{Target: &cfg.ClientID, FlagName: "client-id", EnvKey: "OIDC_TOKEN_CLIENT_ID", JsonKey: "client_id", Usage: "OAuth2/OIDC client ID"},
+		&flagbinding.StringField{Target: &cfg.Scope, FlagName: "scope", EnvKey: "OIDC_TOKEN_SCOPE", JsonKey: "scope", Usage: "space-separated OAuth2 scopes to request", Def: DefaultScope},
+		&flagbinding.StringField{Target: &cfg.Audience, FlagName: "audience", EnvKey: "OIDC_TOKEN_AUDIENCE", JsonKey: "audience", Usage: "expected audience (aud) claim; required whenever the relying party checks it"},
+		&flagbinding.StringField{Target: &grantTypeStr, FlagName: "grant-type", EnvKey: "OIDC_TOKEN_GRANT_TYPE", JsonKey: "grant_type", Usage: "auto|authcode|device-code|token-exchange", Def: string(GrantAuto)},
+		&flagbinding.StringField{Target: &tokenTypeStr, FlagName: "token-type", EnvKey: "OIDC_TOKEN_TOKEN_TYPE", JsonKey: "token_type", Usage: "access_token|id_token", Def: string(TokenTypeAccessToken)},
+		&flagbinding.StringField{Target: &cfg.TokenStoreDir, FlagName: "token-store-dir", EnvKey: "OIDC_TOKEN_STORE_DIR", JsonKey: "token_store_dir", Usage: "override the token store directory used by the file backend (default: $XDG_CACHE_HOME/oidc-token or ~/.cache/oidc-token)"},
+		&flagbinding.StringField{Target: &tokenStoreStr, FlagName: "token-store", EnvKey: "OIDC_TOKEN_STORE", JsonKey: "token_store", Usage: "auto|keychain|file|none: where tokens are stored; none disables persistence entirely", Def: string(cache.BackendAuto)},
+		&flagbinding.BoolField{Target: &cfg.NonInteractive, FlagName: "non-interactive", EnvKey: "OIDC_TOKEN_NON_INTERACTIVE", JsonKey: "non_interactive", Usage: "fail fast instead of opening a browser or a device-code prompt"},
+		&flagbinding.BoolField{Target: &cfg.All, FlagName: "all", JsonKey: "all", Usage: "print a JSON document with every available credential field instead of a bare token"},
+		&flagbinding.BoolField{Target: &cfg.Logout, FlagName: "logout", EnvKey: "OIDC_TOKEN_LOGOUT", JsonKey: "logout", Usage: "clear the cached entry for --issuer/--client-id and exit, without logging in or refreshing"},
+		&flagbinding.StringField{Target: &clientAuthStr, FlagName: "client-auth-method", EnvKey: "OIDC_TOKEN_CLIENT_AUTH_METHOD", JsonKey: "client_auth_method", Usage: "client authentication method for the token endpoint: \"\"|client_secret_basic|client_secret_post|private_key_jwt"},
+		&flagbinding.StringField{Target: &cfg.ClientSecret, FlagName: "client-secret", EnvKey: "OIDC_TOKEN_CLIENT_SECRET", JsonKey: "client_secret", Usage: "client secret for client_secret_basic/client_secret_post (prefer --client-secret-file or $OIDC_TOKEN_CLIENT_SECRET over this flag)"},
+		&flagbinding.StringField{Target: &cfg.PrivateKeyPath, FlagName: "private-key-file", EnvKey: "OIDC_TOKEN_PRIVATE_KEY_FILE", JsonKey: "private_key_file", Usage: "PEM file (PKCS#1/PKCS#8/EC) used to sign the private_key_jwt client assertion"},
+		&flagbinding.StringField{Target: &cfg.PrivateKeyID, FlagName: "private-key-id", EnvKey: "OIDC_TOKEN_PRIVATE_KEY_ID", JsonKey: "private_key_id", Usage: "optional \"kid\" header on the private_key_jwt client assertion"},
+		&flagbinding.StringField{Target: &cfg.PrivateKeySigningAlg, FlagName: "private-key-alg", EnvKey: "OIDC_TOKEN_PRIVATE_KEY_ALG", JsonKey: "private_key_alg", Usage: "JWS signing algorithm for private_key_jwt: RS256|RS384|RS512|PS256|PS384|PS512|ES256|ES384|ES512", Def: DefaultPrivateKeySigningAlg},
+		&flagbinding.StringField{Target: &cfg.ClientAssertionAudience, FlagName: "client-assertion-audience", EnvKey: "OIDC_TOKEN_CLIENT_ASSERTION_AUDIENCE", JsonKey: "client_assertion_audience", Usage: "override the \"aud\" claim of the private_key_jwt assertion (default: the discovered token endpoint)"},
+	}
+
+	// Collect grant-specific table-driven fields alongside the universal
+	// ones, so they share the same registration and resolution loops.
+	for _, g := range grants {
+		fields = append(fields, g.Fields()...)
 	}
 
 	// Special flags that don't fit the table.
@@ -231,7 +238,7 @@ func Parse(args []string, stderr io.Writer, env Env, grants []grant.Grant) (*Con
 
 	// 1. Register table-driven flags, grant flags, and special flags.
 	for _, f := range fields {
-		f.register(fs)
+		f.Register(fs)
 	}
 	for _, g := range grants {
 		g.RegisterFlags(fs)
@@ -259,9 +266,9 @@ func Parse(args []string, stderr io.Writer, env Env, grants []grant.Grant) (*Con
 	fs.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
 
 	for _, f := range fields {
-		f.applyEnv(env.get)
-		f.applyFile(rawFC)
-		f.applyFlag(explicit)
+		f.ApplyEnv(env.get)
+		f.ApplyFile(rawFC)
+		f.ApplyFlag(explicit)
 	}
 
 	// 4. Copy intermediate strings to typed config fields.
@@ -309,7 +316,7 @@ func Parse(args []string, stderr io.Writer, env Env, grants []grant.Grant) (*Con
 	// 6. Let each grant finalize its own flag state with the full layering
 	// context (explicit flags, env-var lookup, raw file config).
 	for _, g := range grants {
-		if err := g.Finalize(explicit, env.get, rawFC); err != nil {
+		if err := g.Finalize(explicit); err != nil {
 			return nil, err
 		}
 	}

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/url"
 
+	"github.com/abinnovision/oidc-token-cli/internal/flagbinding"
 	"github.com/abinnovision/oidc-token-cli/internal/output"
 )
 
@@ -25,11 +26,19 @@ type Grant interface {
 	// Called once during config.Parse, before fs.Parse(args).
 	RegisterFlags(fs *flag.FlagSet)
 
-	// Finalize is called after flag parsing with the set of explicitly-set
-	// flag names, the env-var lookup function, and the raw JSON config file
-	// as a map. Each grant applies its own layering
-	// (env -> file -> explicit flag) to its flags.
-	Finalize(explicit map[string]bool, env EnvFunc, fc map[string]any) error
+	// Fields returns this grant's table-driven config fields, resolved
+	// through the same four-layer precedence stack (default < env < file <
+	// explicit flag) as the universal config fields. Grants that don't use
+	// the table for a given field manage it manually via RegisterFlags and
+	// Finalize.
+	Fields() []flagbinding.Field
+
+	// Finalize is called after flag parsing and after all Fields have been
+	// resolved, with the set of explicitly-set flag names. Each grant
+	// applies any post-resolution logic that doesn't fit the table (e.g.
+	// reading a *-file flag's contents, defaulting one field based on
+	// another).
+	Finalize(explicit map[string]bool) error
 
 	// Bridge returns the grant's resolved values for backward-compatible
 	// copy into the Config struct. Grants that own no config-bridged
@@ -62,10 +71,6 @@ type Grant interface {
 	// Execute performs the token request against the discovered provider.
 	Execute(ctx context.Context, p Provider, opts ExecOpts) (output.Result, error)
 }
-
-// EnvFunc is an env-var lookup function injected into grants for config
-// layering (typically os.Getenv or a test fake).
-type EnvFunc func(string) string
 
 // Environment exposes the runtime capabilities grant selection needs.
 type Environment interface {
