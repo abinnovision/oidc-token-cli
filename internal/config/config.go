@@ -154,32 +154,6 @@ type Config struct {
 	SubjectTokenSource SubjectTokenSource
 }
 
-// fileConfig mirrors Config's JSON-file representation for universal fields.
-// Every field is a pointer so "absent from the file" is distinguishable from
-// "zero value". Grant-specific fields (subject_token, resource, redirect_port
-// etc.) are read from the raw map[string]any passed to each grant's Finalize.
-type fileConfig struct {
-	Issuer         *string `json:"issuer"`
-	ClientID       *string `json:"client_id"`
-	Scope          *string `json:"scope"`
-	Audience       *string `json:"audience"`
-	GrantType      *string `json:"grant_type"`
-	TokenType      *string `json:"token_type"`
-	TokenStoreDir  *string `json:"token_store_dir"`
-	TokenStore     *string `json:"token_store"`
-	NonInteractive *bool   `json:"non_interactive"`
-	All            *bool   `json:"all"`
-	Logout         *bool   `json:"logout"`
-
-	ClientAuthMethod        *string `json:"client_auth_method"`
-	ClientSecret            *string `json:"client_secret"`
-	PrivateKeyPath          *string `json:"private_key_file"`
-	PrivateKeyID            *string `json:"private_key_id"`
-	PrivateKeySigningAlg    *string `json:"private_key_alg"`
-	ClientAssertionAudience *string `json:"client_assertion_audience"`
-
-	Extra map[string]string `json:"extra"`
-}
 
 // Env is the subset of the process environment config.Parse reads from,
 // injected so tests don't depend on real process env or $HOME.
@@ -194,28 +168,6 @@ func (e Env) get(key string) string {
 	return e.Getenv(key)
 }
 
-var envKeys = struct {
-	issuer, clientID, scope, audience, grantType, tokenType, tokenStoreDir, tokenStore, nonInteractive, logout  string
-	clientAuthMethod, clientSecret, privateKeyPath, privateKeyID, privateKeySigningAlg, clientAssertionAudience string
-}{
-	issuer:         "OIDC_TOKEN_ISSUER",
-	clientID:       "OIDC_TOKEN_CLIENT_ID",
-	scope:          "OIDC_TOKEN_SCOPE",
-	audience:       "OIDC_TOKEN_AUDIENCE",
-	grantType:      "OIDC_TOKEN_GRANT_TYPE",
-	tokenType:      "OIDC_TOKEN_TOKEN_TYPE",
-	tokenStoreDir:  "OIDC_TOKEN_STORE_DIR",
-	tokenStore:     "OIDC_TOKEN_STORE",
-	nonInteractive: "OIDC_TOKEN_NON_INTERACTIVE",
-	logout:         "OIDC_TOKEN_LOGOUT",
-
-	clientAuthMethod:        "OIDC_TOKEN_CLIENT_AUTH_METHOD",
-	clientSecret:            "OIDC_TOKEN_CLIENT_SECRET",
-	privateKeyPath:          "OIDC_TOKEN_PRIVATE_KEY_FILE",
-	privateKeyID:            "OIDC_TOKEN_PRIVATE_KEY_ID",
-	privateKeySigningAlg:    "OIDC_TOKEN_PRIVATE_KEY_ALG",
-	clientAssertionAudience: "OIDC_TOKEN_CLIENT_ASSERTION_AUDIENCE",
-}
 
 // Parse builds a Config from, in ascending priority: defaults, environment
 // variables, an optional --config JSON file, then explicitly-set flags.
@@ -236,42 +188,6 @@ func Parse(args []string, stderr io.Writer, env Env, grants []grant.Grant) (*Con
 		fs.PrintDefaults()
 	}
 
-	var (
-		configFile        = fs.String("config", "", "path to an optional JSON config file")
-		issuer            = fs.String("issuer", "", "OIDC issuer URL (discovery is fetched from <issuer>/.well-known/openid-configuration)")
-		clientID          = fs.String("client-id", "", "OAuth2/OIDC client ID")
-		scope             = fs.String("scope", DefaultScope, "space-separated OAuth2 scopes to request")
-		audience          = fs.String("audience", "", "expected audience (aud) claim; required whenever the relying party checks it")
-		grantType         = fs.String("grant-type", string(GrantAuto), "auto|authcode|device-code")
-		tokenType         = fs.String("token-type", string(TokenTypeAccessToken), "access_token|id_token")
-		tokenStoreDirFlag = fs.String("token-store-dir", "", "override the token store directory used by the file backend (default: $XDG_CACHE_HOME/oidc-token or ~/.cache/oidc-token)")
-		tokenStore        = fs.String("token-store", string(cache.BackendAuto), "auto|keychain|file|none: where tokens are stored; none disables persistence entirely")
-		nonInteractive    = fs.Bool("non-interactive", false, "fail fast instead of opening a browser or a device-code prompt")
-		all               = fs.Bool("all", false, "print a JSON document with every available credential field instead of a bare token")
-		logout            = fs.Bool("logout", false, "clear the cached entry for --issuer/--client-id and exit, without logging in or refreshing")
-
-		clientAuthMethod        = fs.String("client-auth-method", string(ClientAuthNone), "client authentication method for the token endpoint: \"\"|client_secret_basic|client_secret_post|private_key_jwt")
-		clientSecret            = fs.String("client-secret", "", "client secret for client_secret_basic/client_secret_post (prefer --client-secret-file or $"+envKeys.clientSecret+" over this flag)")
-		clientSecretFile        = fs.String("client-secret-file", "", "path to a file containing the client secret (trailing newline trimmed); takes precedence over --client-secret")
-		privateKeyFile          = fs.String("private-key-file", "", "PEM file (PKCS#1/PKCS#8/EC) used to sign the private_key_jwt client assertion")
-		privateKeyID            = fs.String("private-key-id", "", "optional \"kid\" header on the private_key_jwt client assertion")
-		privateKeyAlg           = fs.String("private-key-alg", DefaultPrivateKeySigningAlg, "JWS signing algorithm for private_key_jwt: RS256|RS384|RS512|PS256|PS384|PS512|ES256|ES384|ES512")
-		clientAssertionAudience = fs.String("client-assertion-audience", "", "override the \"aud\" claim of the private_key_jwt assertion (default: the discovered token endpoint)")
-
-		extras extraFieldsFlag
-	)
-
-	// Let each grant register its own flags before parsing.
-	for _, g := range grants {
-		g.RegisterFlags(fs)
-	}
-
-	fs.Var(&extras, "extra", "extra key=value pair forwarded to the token endpoint; repeatable")
-
-	if err := fs.Parse(args); err != nil {
-		return nil, err
-	}
-
 	cfg := &Config{
 		Scope:                DefaultScope,
 		GrantType:            GrantAuto,
@@ -280,131 +196,97 @@ func Parse(args []string, stderr io.Writer, env Env, grants []grant.Grant) (*Con
 		PrivateKeySigningAlg: DefaultPrivateKeySigningAlg,
 	}
 
-	// 1. Environment.
-	if v := env.get(envKeys.issuer); v != "" {
-		cfg.Issuer = v
-	}
-	if v := env.get(envKeys.clientID); v != "" {
-		cfg.ClientID = v
-	}
-	if v := env.get(envKeys.scope); v != "" {
-		cfg.Scope = v
-	}
-	if v := env.get(envKeys.audience); v != "" {
-		cfg.Audience = v
-	}
-	if v := env.get(envKeys.grantType); v != "" {
-		cfg.GrantType = GrantType(v)
-	}
-	if v := env.get(envKeys.tokenType); v != "" {
-		cfg.TokenType = TokenType(v)
-	}
-	if v := env.get(envKeys.tokenStoreDir); v != "" {
-		cfg.TokenStoreDir = v
-	}
-	if v := env.get(envKeys.tokenStore); v != "" {
-		cfg.TokenStore = cache.Backend(v)
-	}
-	if v := env.get(envKeys.nonInteractive); v != "" {
-		cfg.NonInteractive = v == "1" || v == "true"
-	}
-	if v := env.get(envKeys.logout); v != "" {
-		cfg.Logout = v == "1" || v == "true"
-	}
-	if v := env.get(envKeys.clientAuthMethod); v != "" {
-		cfg.ClientAuthMethod = ClientAuthMethod(v)
-	}
-	if v := env.get(envKeys.clientSecret); v != "" {
-		cfg.ClientSecret = v
-	}
-	if v := env.get(envKeys.privateKeyPath); v != "" {
-		cfg.PrivateKeyPath = v
-	}
-	if v := env.get(envKeys.privateKeyID); v != "" {
-		cfg.PrivateKeyID = v
-	}
-	if v := env.get(envKeys.privateKeySigningAlg); v != "" {
-		cfg.PrivateKeySigningAlg = v
-	}
-	if v := env.get(envKeys.clientAssertionAudience); v != "" {
-		cfg.ClientAssertionAudience = v
+	// Intermediate strings for custom-type fields, resolved after the loop.
+	var (
+		grantTypeStr  = string(GrantAuto)
+		tokenTypeStr  = string(TokenTypeAccessToken)
+		tokenStoreStr = string(cache.BackendAuto)
+		clientAuthStr string
+	)
+
+	// The binding table: one entry per universal config field, four layers,
+	// zero per-field boilerplate.
+	fields := []field{
+		&stringField{target: &cfg.Issuer, flagName: "issuer", envKey: "OIDC_TOKEN_ISSUER", jsonKey: "issuer", usage: "OIDC issuer URL (discovery is fetched from <issuer>/.well-known/openid-configuration)"},
+		&stringField{target: &cfg.ClientID, flagName: "client-id", envKey: "OIDC_TOKEN_CLIENT_ID", jsonKey: "client_id", usage: "OAuth2/OIDC client ID"},
+		&stringField{target: &cfg.Scope, flagName: "scope", envKey: "OIDC_TOKEN_SCOPE", jsonKey: "scope", usage: "space-separated OAuth2 scopes to request", def: DefaultScope},
+		&stringField{target: &cfg.Audience, flagName: "audience", envKey: "OIDC_TOKEN_AUDIENCE", jsonKey: "audience", usage: "expected audience (aud) claim; required whenever the relying party checks it"},
+		&stringField{target: &grantTypeStr, flagName: "grant-type", envKey: "OIDC_TOKEN_GRANT_TYPE", jsonKey: "grant_type", usage: "auto|authcode|device-code|token-exchange", def: string(GrantAuto)},
+		&stringField{target: &tokenTypeStr, flagName: "token-type", envKey: "OIDC_TOKEN_TOKEN_TYPE", jsonKey: "token_type", usage: "access_token|id_token", def: string(TokenTypeAccessToken)},
+		&stringField{target: &cfg.TokenStoreDir, flagName: "token-store-dir", envKey: "OIDC_TOKEN_STORE_DIR", jsonKey: "token_store_dir", usage: "override the token store directory used by the file backend (default: $XDG_CACHE_HOME/oidc-token or ~/.cache/oidc-token)"},
+		&stringField{target: &tokenStoreStr, flagName: "token-store", envKey: "OIDC_TOKEN_STORE", jsonKey: "token_store", usage: "auto|keychain|file|none: where tokens are stored; none disables persistence entirely", def: string(cache.BackendAuto)},
+		&boolField{target: &cfg.NonInteractive, flagName: "non-interactive", envKey: "OIDC_TOKEN_NON_INTERACTIVE", jsonKey: "non_interactive", usage: "fail fast instead of opening a browser or a device-code prompt"},
+		&boolField{target: &cfg.All, flagName: "all", jsonKey: "all", usage: "print a JSON document with every available credential field instead of a bare token"},
+		&boolField{target: &cfg.Logout, flagName: "logout", envKey: "OIDC_TOKEN_LOGOUT", jsonKey: "logout", usage: "clear the cached entry for --issuer/--client-id and exit, without logging in or refreshing"},
+		&stringField{target: &clientAuthStr, flagName: "client-auth-method", envKey: "OIDC_TOKEN_CLIENT_AUTH_METHOD", jsonKey: "client_auth_method", usage: "client authentication method for the token endpoint: \"\"|client_secret_basic|client_secret_post|private_key_jwt"},
+		&stringField{target: &cfg.ClientSecret, flagName: "client-secret", envKey: "OIDC_TOKEN_CLIENT_SECRET", jsonKey: "client_secret", usage: "client secret for client_secret_basic/client_secret_post (prefer --client-secret-file or $OIDC_TOKEN_CLIENT_SECRET over this flag)"},
+		&stringField{target: &cfg.PrivateKeyPath, flagName: "private-key-file", envKey: "OIDC_TOKEN_PRIVATE_KEY_FILE", jsonKey: "private_key_file", usage: "PEM file (PKCS#1/PKCS#8/EC) used to sign the private_key_jwt client assertion"},
+		&stringField{target: &cfg.PrivateKeyID, flagName: "private-key-id", envKey: "OIDC_TOKEN_PRIVATE_KEY_ID", jsonKey: "private_key_id", usage: "optional \"kid\" header on the private_key_jwt client assertion"},
+		&stringField{target: &cfg.PrivateKeySigningAlg, flagName: "private-key-alg", envKey: "OIDC_TOKEN_PRIVATE_KEY_ALG", jsonKey: "private_key_alg", usage: "JWS signing algorithm for private_key_jwt: RS256|RS384|RS512|PS256|PS384|PS512|ES256|ES384|ES512", def: DefaultPrivateKeySigningAlg},
+		&stringField{target: &cfg.ClientAssertionAudience, flagName: "client-assertion-audience", envKey: "OIDC_TOKEN_CLIENT_ASSERTION_AUDIENCE", jsonKey: "client_assertion_audience", usage: "override the \"aud\" claim of the private_key_jwt assertion (default: the discovered token endpoint)"},
 	}
 
-	// 2. Config file: parse once as typed struct for universal fields and
-	// as raw map[string]any for grant-specific fields.
+	// Special flags that don't fit the table.
+	configFile := fs.String("config", "", "path to an optional JSON config file")
+	clientSecretFile := fs.String("client-secret-file", "", "path to a file containing the client secret (trailing newline trimmed); takes precedence over --client-secret")
+	var extras extraFieldsFlag
+
+	// 1. Register table-driven flags, grant flags, and special flags.
+	for _, f := range fields {
+		f.register(fs)
+	}
+	for _, g := range grants {
+		g.RegisterFlags(fs)
+	}
+	fs.Var(&extras, "extra", "extra key=value pair forwarded to the token endpoint; repeatable")
+
+	if err := fs.Parse(args); err != nil {
+		return nil, err
+	}
+
+	// 2. Parse config file once as raw map (used by both table and grants).
 	var rawFC map[string]any
 	if *configFile != "" {
 		b, err := os.ReadFile(*configFile) //nolint:gosec // path is a user-supplied CLI flag
 		if err != nil {
 			return nil, fmt.Errorf("config: read config file: %w", err)
 		}
-		var fc fileConfig
-		if err := json.Unmarshal(b, &fc); err != nil {
-			return nil, fmt.Errorf("config: parse config file: %w", err)
-		}
-		applyFileConfig(cfg, &fc)
 		if err := json.Unmarshal(b, &rawFC); err != nil {
 			return nil, fmt.Errorf("config: parse config file: %w", err)
 		}
 	}
 
-	// 3. Explicitly-set flags only (flag.Visit skips flags left at default).
+	// 3. Resolve each field through the precedence stack: env < file < flag.
 	explicit := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
 
-	if explicit["issuer"] {
-		cfg.Issuer = *issuer
+	for _, f := range fields {
+		f.applyEnv(env.get)
+		f.applyFile(rawFC)
+		f.applyFlag(explicit)
 	}
-	if explicit["client-id"] {
-		cfg.ClientID = *clientID
-	}
-	if explicit["scope"] {
-		cfg.Scope = *scope
-	}
-	if explicit["audience"] {
-		cfg.Audience = *audience
-	}
-	if explicit["grant-type"] {
-		cfg.GrantType = GrantType(*grantType)
-	}
-	if explicit["token-type"] {
-		cfg.TokenType = TokenType(*tokenType)
-	}
-	if explicit["token-store-dir"] {
-		cfg.TokenStoreDir = *tokenStoreDirFlag
-	}
-	if explicit["token-store"] {
-		cfg.TokenStore = cache.Backend(*tokenStore)
-	}
-	if explicit["non-interactive"] {
-		cfg.NonInteractive = *nonInteractive
-	}
-	if explicit["all"] {
-		cfg.All = *all
-	}
-	if explicit["logout"] {
-		cfg.Logout = *logout
-	}
-	if explicit["client-auth-method"] {
-		cfg.ClientAuthMethod = ClientAuthMethod(*clientAuthMethod)
-	}
-	if explicit["client-secret"] {
-		cfg.ClientSecret = *clientSecret
-	}
-	if explicit["private-key-file"] {
-		cfg.PrivateKeyPath = *privateKeyFile
-	}
-	if explicit["private-key-id"] {
-		cfg.PrivateKeyID = *privateKeyID
-	}
-	if explicit["private-key-alg"] {
-		cfg.PrivateKeySigningAlg = *privateKeyAlg
-	}
-	if explicit["client-assertion-audience"] {
-		cfg.ClientAssertionAudience = *clientAssertionAudience
-	}
+
+	// 4. Copy intermediate strings to typed config fields.
+	cfg.GrantType = GrantType(grantTypeStr)
+	cfg.TokenType = TokenType(tokenTypeStr)
+	cfg.TokenStore = cache.Backend(tokenStoreStr)
+	cfg.ClientAuthMethod = ClientAuthMethod(clientAuthStr)
+
+	// 5. Special-case overrides not covered by the table.
 	if explicit["extra"] {
 		cfg.ExtraFields = url.Values(extras)
+	}
+	if rawFC != nil {
+		if extraMap, ok := rawFC["extra"].(map[string]any); ok {
+			if cfg.ExtraFields == nil {
+				cfg.ExtraFields = url.Values{}
+			}
+			for k, v := range extraMap {
+				if s, ok := v.(string); ok {
+					cfg.ExtraFields.Set(k, s)
+				}
+			}
+		}
 	}
 
 	// --client-secret-file always takes precedence over --client-secret /
@@ -426,7 +308,7 @@ func Parse(args []string, stderr io.Writer, env Env, grants []grant.Grant) (*Con
 		cfg.TokenStoreDir = dir
 	}
 
-	// 4. Let each grant finalize its own flag state with the full layering
+	// 6. Let each grant finalize its own flag state with the full layering
 	// context (explicit flags, env-var lookup, raw file config).
 	for _, g := range grants {
 		if err := g.Finalize(explicit, env.get, rawFC); err != nil {
@@ -434,12 +316,12 @@ func Parse(args []string, stderr io.Writer, env Env, grants []grant.Grant) (*Con
 		}
 	}
 
-	// 5. Validate universal config fields.
+	// 7. Validate universal config fields.
 	if err := cfg.validate(grants); err != nil {
 		return nil, err
 	}
 
-	// 6. Validate grants: the selected grant checks internal consistency;
+	// 8. Validate grants: the selected grant checks internal consistency;
 	// non-selected grants check that their flags weren't erroneously set.
 	for _, g := range grants {
 		if g.Name() == string(cfg.GrantType) {
@@ -453,7 +335,7 @@ func Parse(args []string, stderr io.Writer, env Env, grants []grant.Grant) (*Con
 		}
 	}
 
-	// 7. Copy grant-resolved values back into Config for backward compat.
+	// 9. Copy grant-resolved values back into Config for backward compat.
 	for _, g := range grants {
 		b := g.Bridge()
 		if b.SubjectToken != "" {
@@ -583,67 +465,6 @@ func (c *Config) resolvePrivateKey() error {
 	return fmt.Errorf("config: --private-key-file %q is not a supported PEM-encoded private key (want PKCS#1, PKCS#8, or EC)", c.PrivateKeyPath)
 }
 
-func applyFileConfig(cfg *Config, fc *fileConfig) {
-	if fc.Issuer != nil {
-		cfg.Issuer = *fc.Issuer
-	}
-	if fc.ClientID != nil {
-		cfg.ClientID = *fc.ClientID
-	}
-	if fc.Scope != nil {
-		cfg.Scope = *fc.Scope
-	}
-	if fc.Audience != nil {
-		cfg.Audience = *fc.Audience
-	}
-	if fc.GrantType != nil {
-		cfg.GrantType = GrantType(*fc.GrantType)
-	}
-	if fc.TokenType != nil {
-		cfg.TokenType = TokenType(*fc.TokenType)
-	}
-	if fc.TokenStoreDir != nil {
-		cfg.TokenStoreDir = *fc.TokenStoreDir
-	}
-	if fc.TokenStore != nil {
-		cfg.TokenStore = cache.Backend(*fc.TokenStore)
-	}
-	if fc.NonInteractive != nil {
-		cfg.NonInteractive = *fc.NonInteractive
-	}
-	if fc.All != nil {
-		cfg.All = *fc.All
-	}
-	if fc.Logout != nil {
-		cfg.Logout = *fc.Logout
-	}
-	if fc.ClientAuthMethod != nil {
-		cfg.ClientAuthMethod = ClientAuthMethod(*fc.ClientAuthMethod)
-	}
-	if fc.ClientSecret != nil {
-		cfg.ClientSecret = *fc.ClientSecret
-	}
-	if fc.PrivateKeyPath != nil {
-		cfg.PrivateKeyPath = *fc.PrivateKeyPath
-	}
-	if fc.PrivateKeyID != nil {
-		cfg.PrivateKeyID = *fc.PrivateKeyID
-	}
-	if fc.PrivateKeySigningAlg != nil {
-		cfg.PrivateKeySigningAlg = *fc.PrivateKeySigningAlg
-	}
-	if fc.ClientAssertionAudience != nil {
-		cfg.ClientAssertionAudience = *fc.ClientAssertionAudience
-	}
-	if len(fc.Extra) > 0 {
-		if cfg.ExtraFields == nil {
-			cfg.ExtraFields = url.Values{}
-		}
-		for k, v := range fc.Extra {
-			cfg.ExtraFields.Set(k, v)
-		}
-	}
-}
 
 // extraFieldsFlag implements flag.Value for --extra key=value, a repeatable
 // flag that accumulates into url.Values.
