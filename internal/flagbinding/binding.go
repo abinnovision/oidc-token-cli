@@ -6,6 +6,14 @@ import (
 	"strings"
 )
 
+// usageWithEnv appends " [$key]" to usage when key is non-empty.
+func usageWithEnv(usage, key string) string {
+	if key == "" {
+		return usage
+	}
+	return usage + " [$" + key + "]"
+}
+
 // Field describes how a single config value is populated from the four-layer
 // precedence stack: default < env < file < explicit flag.
 type Field interface {
@@ -28,7 +36,7 @@ type StringField struct {
 }
 
 func (f *StringField) Register(fs *flag.FlagSet) {
-	f.flagVal = fs.String(f.FlagName, f.Def, f.Usage)
+	f.flagVal = fs.String(f.FlagName, f.Def, usageWithEnv(f.Usage, f.EnvKey))
 }
 
 func (f *StringField) ApplyEnv(env func(string) string) {
@@ -68,7 +76,7 @@ type BoolField struct {
 }
 
 func (f *BoolField) Register(fs *flag.FlagSet) {
-	f.flagVal = fs.Bool(f.FlagName, f.Def, f.Usage)
+	f.flagVal = fs.Bool(f.FlagName, f.Def, usageWithEnv(f.Usage, f.EnvKey))
 }
 
 func (f *BoolField) ApplyEnv(env func(string) string) {
@@ -108,7 +116,7 @@ type IntField struct {
 }
 
 func (f *IntField) Register(fs *flag.FlagSet) {
-	f.flagVal = fs.Int(f.FlagName, f.Def, f.Usage)
+	f.flagVal = fs.Int(f.FlagName, f.Def, usageWithEnv(f.Usage, f.EnvKey))
 }
 
 func (f *IntField) ApplyEnv(env func(string) string) {
@@ -149,7 +157,7 @@ type StringSliceField struct {
 }
 
 func (f *StringSliceField) Register(fs *flag.FlagSet) {
-	fs.Var(&f.flagVal, f.FlagName, f.Usage)
+	fs.Var(&f.flagVal, f.FlagName, usageWithEnv(f.Usage, f.EnvKey))
 }
 
 func (f *StringSliceField) ApplyEnv(env func(string) string) {

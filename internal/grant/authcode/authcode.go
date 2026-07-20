@@ -32,7 +32,7 @@ func (g *AuthCode) RegisterFlags(_ *flag.FlagSet) {}
 
 func (g *AuthCode) Fields() []flagbinding.Field {
 	return []flagbinding.Field{
-		&flagbinding.IntField{Target: &g.CallbackPort, FlagName: "redirect", JsonKey: "redirect_port", Usage: "fixed loopback callback port for authcode; 0 selects an ephemeral port"},
+		&flagbinding.IntField{Target: &g.CallbackPort, FlagName: "redirect", JsonKey: "redirect_port", Usage: "loopback callback port for authcode"},
 	}
 }
 
