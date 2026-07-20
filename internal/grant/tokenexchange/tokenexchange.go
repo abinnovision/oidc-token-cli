@@ -53,16 +53,16 @@ func (g *TokenExchange) AutoEligible() bool { return false }
 func (g *TokenExchange) Viable(_ grant.Environment, _ bool) bool { return true }
 
 func (g *TokenExchange) RegisterFlags(fs *flag.FlagSet) {
-	g.subjectTokenFile = fs.String("subject-token-file", "", "path to a file containing the subject_token (trailing newline trimmed); takes precedence over --subject-token")
+	g.subjectTokenFile = fs.String("subject-token-file", "", "file containing the subject_token")
 }
 
 func (g *TokenExchange) Fields() []flagbinding.Field {
 	return []flagbinding.Field{
-		&flagbinding.StringField{Target: &g.SubjectToken, FlagName: "subject-token", EnvKey: envSubjectToken, JsonKey: "subject_token", Usage: "subject_token for RFC 8693 token exchange (--grant-type=token-exchange); prefer --subject-token-file or $" + envSubjectToken + " over this flag"},
-		&flagbinding.StringField{Target: &g.SubjectTokenType, FlagName: "subject-token-type", EnvKey: envSubjectTokenType, JsonKey: "subject_token_type", Usage: "subject_token_type per RFC 8693 §3 (--grant-type=token-exchange); defaults to the access_token type, or the id_token type when --subject-token-source=github-actions"},
-		&flagbinding.StringField{Target: &g.RequestedTokenType, FlagName: "requested-token-type", JsonKey: "requested_token_type", Usage: "optional requested_token_type per RFC 8693 §2.1 (--grant-type=token-exchange); omitted from the request entirely when unset"},
-		&flagbinding.StringField{Target: &g.SubjectTokenSource, FlagName: "subject-token-source", EnvKey: envSubjectTokenSource, JsonKey: "subject_token_source", Usage: `auto-fetch subject_token from an external source instead of --subject-token: "" (manual, default) | github-actions (--grant-type=token-exchange only); mutually exclusive with --subject-token/--subject-token-file/$` + envSubjectToken},
-		&flagbinding.StringSliceField{Target: &g.Resources, FlagName: "resource", JsonKey: "resource", Usage: "target resource URI for RFC 8693 token exchange (--grant-type=token-exchange); repeatable for multiple resource params"},
+		&flagbinding.StringField{Target: &g.SubjectToken, FlagName: "subject-token", EnvKey: envSubjectToken, JsonKey: "subject_token", Usage: "subject_token value for token exchange"},
+		&flagbinding.StringField{Target: &g.SubjectTokenType, FlagName: "subject-token-type", EnvKey: envSubjectTokenType, JsonKey: "subject_token_type", Usage: "subject_token_type per RFC 8693"},
+		&flagbinding.StringField{Target: &g.RequestedTokenType, FlagName: "requested-token-type", JsonKey: "requested_token_type", Usage: "requested_token_type per RFC 8693"},
+		&flagbinding.StringField{Target: &g.SubjectTokenSource, FlagName: "subject-token-source", EnvKey: envSubjectTokenSource, JsonKey: "subject_token_source", Usage: "subject_token source: github-actions"},
+		&flagbinding.StringSliceField{Target: &g.Resources, FlagName: "resource", JsonKey: "resource", Usage: "target resource URI (repeatable)"},
 	}
 }
 

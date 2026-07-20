@@ -205,23 +205,23 @@ func Parse(args []string, stderr io.Writer, env Env, grants []grant.Grant) (*Con
 	// The binding table: one entry per universal config field, four layers,
 	// zero per-field boilerplate.
 	fields := []flagbinding.Field{
-		&flagbinding.StringField{Target: &cfg.Issuer, FlagName: "issuer", EnvKey: "OIDC_TOKEN_ISSUER", JsonKey: "issuer", Usage: "OIDC issuer URL (discovery is fetched from <issuer>/.well-known/openid-configuration)"},
-		&flagbinding.StringField{Target: &cfg.ClientID, FlagName: "client-id", EnvKey: "OIDC_TOKEN_CLIENT_ID", JsonKey: "client_id", Usage: "OAuth2/OIDC client ID"},
-		&flagbinding.StringField{Target: &cfg.Scope, FlagName: "scope", EnvKey: "OIDC_TOKEN_SCOPE", JsonKey: "scope", Usage: "space-separated OAuth2 scopes to request", Def: DefaultScope},
-		&flagbinding.StringField{Target: &cfg.Audience, FlagName: "audience", EnvKey: "OIDC_TOKEN_AUDIENCE", JsonKey: "audience", Usage: "expected audience (aud) claim; required whenever the relying party checks it"},
+		&flagbinding.StringField{Target: &cfg.Issuer, FlagName: "issuer", EnvKey: "OIDC_TOKEN_ISSUER", JsonKey: "issuer", Usage: "OIDC issuer URL"},
+		&flagbinding.StringField{Target: &cfg.ClientID, FlagName: "client-id", EnvKey: "OIDC_TOKEN_CLIENT_ID", JsonKey: "client_id", Usage: "OAuth2 client ID"},
+		&flagbinding.StringField{Target: &cfg.Scope, FlagName: "scope", EnvKey: "OIDC_TOKEN_SCOPE", JsonKey: "scope", Usage: "space-separated OAuth2 scopes", Def: DefaultScope},
+		&flagbinding.StringField{Target: &cfg.Audience, FlagName: "audience", EnvKey: "OIDC_TOKEN_AUDIENCE", JsonKey: "audience", Usage: "audience (aud) claim for the token request"},
 		&flagbinding.StringField{Target: &grantTypeStr, FlagName: "grant-type", EnvKey: "OIDC_TOKEN_GRANT_TYPE", JsonKey: "grant_type", Usage: "auto|authcode|device-code|token-exchange", Def: string(GrantAuto)},
 		&flagbinding.StringField{Target: &tokenTypeStr, FlagName: "token-type", EnvKey: "OIDC_TOKEN_TOKEN_TYPE", JsonKey: "token_type", Usage: "access_token|id_token", Def: string(TokenTypeAccessToken)},
-		&flagbinding.StringField{Target: &cfg.TokenStoreDir, FlagName: "token-store-dir", EnvKey: "OIDC_TOKEN_STORE_DIR", JsonKey: "token_store_dir", Usage: "override the token store directory used by the file backend (default: $XDG_CACHE_HOME/oidc-token or ~/.cache/oidc-token)"},
-		&flagbinding.StringField{Target: &tokenStoreStr, FlagName: "token-store", EnvKey: "OIDC_TOKEN_STORE", JsonKey: "token_store", Usage: "auto|keychain|file|none: where tokens are stored; none disables persistence entirely", Def: string(cache.BackendAuto)},
-		&flagbinding.BoolField{Target: &cfg.NonInteractive, FlagName: "non-interactive", EnvKey: "OIDC_TOKEN_NON_INTERACTIVE", JsonKey: "non_interactive", Usage: "fail fast instead of opening a browser or a device-code prompt"},
-		&flagbinding.BoolField{Target: &cfg.All, FlagName: "all", JsonKey: "all", Usage: "print a JSON document with every available credential field instead of a bare token"},
-		&flagbinding.BoolField{Target: &cfg.Logout, FlagName: "logout", EnvKey: "OIDC_TOKEN_LOGOUT", JsonKey: "logout", Usage: "clear the cached entry for --issuer/--client-id and exit, without logging in or refreshing"},
-		&flagbinding.StringField{Target: &clientAuthStr, FlagName: "client-auth-method", EnvKey: "OIDC_TOKEN_CLIENT_AUTH_METHOD", JsonKey: "client_auth_method", Usage: "client authentication method for the token endpoint: \"\"|client_secret_basic|client_secret_post|private_key_jwt"},
-		&flagbinding.StringField{Target: &cfg.ClientSecret, FlagName: "client-secret", EnvKey: "OIDC_TOKEN_CLIENT_SECRET", JsonKey: "client_secret", Usage: "client secret for client_secret_basic/client_secret_post (prefer --client-secret-file or $OIDC_TOKEN_CLIENT_SECRET over this flag)"},
-		&flagbinding.StringField{Target: &cfg.PrivateKeyPath, FlagName: "private-key-file", EnvKey: "OIDC_TOKEN_PRIVATE_KEY_FILE", JsonKey: "private_key_file", Usage: "PEM file (PKCS#1/PKCS#8/EC) used to sign the private_key_jwt client assertion"},
-		&flagbinding.StringField{Target: &cfg.PrivateKeyID, FlagName: "private-key-id", EnvKey: "OIDC_TOKEN_PRIVATE_KEY_ID", JsonKey: "private_key_id", Usage: "optional \"kid\" header on the private_key_jwt client assertion"},
-		&flagbinding.StringField{Target: &cfg.PrivateKeySigningAlg, FlagName: "private-key-alg", EnvKey: "OIDC_TOKEN_PRIVATE_KEY_ALG", JsonKey: "private_key_alg", Usage: "JWS signing algorithm for private_key_jwt: RS256|RS384|RS512|PS256|PS384|PS512|ES256|ES384|ES512", Def: DefaultPrivateKeySigningAlg},
-		&flagbinding.StringField{Target: &cfg.ClientAssertionAudience, FlagName: "client-assertion-audience", EnvKey: "OIDC_TOKEN_CLIENT_ASSERTION_AUDIENCE", JsonKey: "client_assertion_audience", Usage: "override the \"aud\" claim of the private_key_jwt assertion (default: the discovered token endpoint)"},
+		&flagbinding.StringField{Target: &cfg.TokenStoreDir, FlagName: "token-store-dir", EnvKey: "OIDC_TOKEN_STORE_DIR", JsonKey: "token_store_dir", Usage: "token store directory for the file backend"},
+		&flagbinding.StringField{Target: &tokenStoreStr, FlagName: "token-store", EnvKey: "OIDC_TOKEN_STORE", JsonKey: "token_store", Usage: "auto|keychain|file|none", Def: string(cache.BackendAuto)},
+		&flagbinding.BoolField{Target: &cfg.NonInteractive, FlagName: "non-interactive", EnvKey: "OIDC_TOKEN_NON_INTERACTIVE", JsonKey: "non_interactive", Usage: "disable browser and device-code prompts"},
+		&flagbinding.BoolField{Target: &cfg.All, FlagName: "all", JsonKey: "all", Usage: "print full JSON token response"},
+		&flagbinding.BoolField{Target: &cfg.Logout, FlagName: "logout", EnvKey: "OIDC_TOKEN_LOGOUT", JsonKey: "logout", Usage: "clear cached tokens and exit"},
+		&flagbinding.StringField{Target: &clientAuthStr, FlagName: "client-auth-method", EnvKey: "OIDC_TOKEN_CLIENT_AUTH_METHOD", JsonKey: "client_auth_method", Usage: "client_secret_basic|client_secret_post|private_key_jwt"},
+		&flagbinding.StringField{Target: &cfg.ClientSecret, FlagName: "client-secret", EnvKey: "OIDC_TOKEN_CLIENT_SECRET", JsonKey: "client_secret", Usage: "client secret for client_secret_basic or client_secret_post"},
+		&flagbinding.StringField{Target: &cfg.PrivateKeyPath, FlagName: "private-key-file", EnvKey: "OIDC_TOKEN_PRIVATE_KEY_FILE", JsonKey: "private_key_file", Usage: "PEM private key file for private_key_jwt"},
+		&flagbinding.StringField{Target: &cfg.PrivateKeyID, FlagName: "private-key-id", EnvKey: "OIDC_TOKEN_PRIVATE_KEY_ID", JsonKey: "private_key_id", Usage: "kid header for the private_key_jwt assertion"},
+		&flagbinding.StringField{Target: &cfg.PrivateKeySigningAlg, FlagName: "private-key-alg", EnvKey: "OIDC_TOKEN_PRIVATE_KEY_ALG", JsonKey: "private_key_alg", Usage: "signing algorithm for private_key_jwt", Def: DefaultPrivateKeySigningAlg},
+		&flagbinding.StringField{Target: &cfg.ClientAssertionAudience, FlagName: "client-assertion-audience", EnvKey: "OIDC_TOKEN_CLIENT_ASSERTION_AUDIENCE", JsonKey: "client_assertion_audience", Usage: "aud claim override for private_key_jwt"},
 	}
 
 	// Collect grant-specific table-driven fields alongside the universal
@@ -231,8 +231,8 @@ func Parse(args []string, stderr io.Writer, env Env, grants []grant.Grant) (*Con
 	}
 
 	// Special flags that don't fit the table.
-	configFile := fs.String("config", "", "path to an optional JSON config file")
-	clientSecretFile := fs.String("client-secret-file", "", "path to a file containing the client secret (trailing newline trimmed); takes precedence over --client-secret")
+	configFile := fs.String("config", "", "path to a JSON config file")
+	clientSecretFile := fs.String("client-secret-file", "", "file containing the client secret")
 	var extras extraFieldsFlag
 
 	// 1. Register table-driven flags, grant flags, and special flags.
@@ -242,7 +242,7 @@ func Parse(args []string, stderr io.Writer, env Env, grants []grant.Grant) (*Con
 	for _, g := range grants {
 		g.RegisterFlags(fs)
 	}
-	fs.Var(&extras, "extra", "extra key=value pair forwarded to the token endpoint; repeatable")
+	fs.Var(&extras, "extra", "extra key=value pair for the token endpoint (repeatable)")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err
