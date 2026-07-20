@@ -55,6 +55,7 @@ oidc-token \
   [--token-store auto|keychain|file|none] \
   [--redirect PORT] \
   [--non-interactive] \
+  [--format token|json|exec-credential] \
   [--all] \
   [--logout] \
   [--config FILE] \
@@ -92,7 +93,8 @@ oidc-token \
 |---|---|---|
 | `--redirect` | `0` (ephemeral) | Fixed loopback port for the authcode callback, if your IdP requires an exact redirect URI. |
 | `--non-interactive` | `false` | Never emit a device-code prompt; authcode+browser is still allowed if a display is available. |
-| `--all` | `false` | Print a JSON document instead of a bare token. |
+| `--format` | `token` | `token`, `json`, or `exec-credential`. See [kubectl ExecCredential](#kubectl-execcredential---format-exec-credential). |
+| `--all` | `false` | Deprecated: alias for `--format=json`. Print a JSON document instead of a bare token. Ignored when `--format` is set explicitly. |
 | `--logout` | `false` | Clear the cached entry for `--issuer`/`--client-id` and exit; no login or refresh is attempted. |
 | `--config` | *(none)* | Optional JSON config file. |
 | `--extra` | *(none)* | Repeatable `key=value` pair forwarded to the token endpoint. In a config file, set as an `"extra"` object. |
@@ -298,7 +300,7 @@ oidc-token --issuer https://id.example.com/ --client-id frpc-client \
   --token-type access_token --audience frps
 ```
 
-### kubectl `ExecCredential`-style (`--all`)
+### kubectl `ExecCredential` (`--format exec-credential`)
 
 ```yaml
 # ~/.kube/config (users[].user.exec)
@@ -309,12 +311,16 @@ exec:
     - --issuer=https://id.example.com/
     - --client-id=my-k8s-client
     - --token-type=id_token
-    - --all
+    - --format=exec-credential
 ```
 
-`--all`'s JSON has `access_token`/`id_token`/`refresh_token`/`expiry` but
-no `apiVersion`/`kind`/`status` envelope — wrap it if your consumer needs
-the literal k8s schema.
+`--format=exec-credential` emits a genuine Kubernetes `ExecCredential`
+envelope: `apiVersion`, `kind: ExecCredential`, and a `status.token` field
+(plus `status.expirationTimestamp` when the token has a known expiry) —
+exactly what `kubectl`'s exec plugin protocol expects, no wrapping needed.
+The `apiVersion` echoes the one `kubectl` passes via `$KUBERNETES_EXEC_INFO`,
+falling back to `client.authentication.k8s.io/v1` when that env var is
+absent or unparsable.
 
 ### CI (`--non-interactive`)
 

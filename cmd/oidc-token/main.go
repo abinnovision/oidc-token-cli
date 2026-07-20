@@ -2,9 +2,10 @@
 // client, using cached credentials and silent refresh where possible.
 //
 // This file is the only place in the program that writes to stdout. On
-// success it writes exactly the token bytes (or, with --all, a JSON
-// document) and exits 0. On any failure it writes a message to stderr,
-// writes nothing to stdout, and exits non-zero.
+// success it writes exactly the selected --format's output (bare token
+// bytes, a JSON document, or an ExecCredential envelope) and exits 0. On
+// any failure it writes a message to stderr, writes nothing to stdout, and
+// exits non-zero.
 package main
 
 import (
@@ -113,7 +114,7 @@ func run(args []string, stdout, stderr io.Writer, newSource newSourceFunc, newTo
 			fmt.Fprintln(stderr, "error:", err)
 			return 1
 		}
-		return writeResult(stdout, stderr, cfg, result)
+		return writeResult(stdout, stderr, cfg, result, os.Getenv)
 	}
 
 	store, err := buildStore(ctx, cfg, stderr)
@@ -144,19 +145,23 @@ func run(args []string, stdout, stderr io.Writer, newSource newSourceFunc, newTo
 		return 1
 	}
 
-	return writeResult(stdout, stderr, cfg, result)
+	return writeResult(stdout, stderr, cfg, result, os.Getenv)
 }
 
-// writeResult writes result to stdout as either a bare token or, with
-// --all, a JSON document. The full output is built in memory first: a
+// writeResult writes result to stdout in the format selected by
+// cfg.Format: a bare token, a full JSON document, or a Kubernetes
+// ExecCredential envelope. The full output is built in memory first: a
 // write failure partway through must never leave a partial token on
 // stdout.
-func writeResult(stdout, stderr io.Writer, cfg *config.Config, result output.Result) int {
+func writeResult(stdout, stderr io.Writer, cfg *config.Config, result output.Result, getenv func(string) string) int {
 	var buf bytes.Buffer
 	var err error
-	if cfg.All {
+	switch cfg.Format {
+	case config.OutputFormatJSON:
 		err = output.WriteAll(&buf, result)
-	} else {
+	case config.OutputFormatExecCredential:
+		err = output.WriteExecCredential(&buf, result, output.TokenType(cfg.TokenType), output.ExecCredentialAPIVersion(getenv))
+	default:
 		err = output.WriteBare(&buf, result, output.TokenType(cfg.TokenType))
 	}
 	if err != nil {

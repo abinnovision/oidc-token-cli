@@ -163,6 +163,90 @@ func TestParse_InvalidTokenType(t *testing.T) {
 	}
 }
 
+func TestParse_Format_DefaultsToToken(t *testing.T) {
+	var stderr bytes.Buffer
+	cfg, err := Parse([]string{"--issuer=https://issuer.example", "--client-id=cid"}, &stderr, Env{Getenv: noEnv}, testGrants())
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.Format != OutputFormatToken {
+		t.Errorf("Format = %q, want %q", cfg.Format, OutputFormatToken)
+	}
+}
+
+func TestParse_Format_JSONAndExecCredential(t *testing.T) {
+	var stderr bytes.Buffer
+	cfg, err := Parse([]string{
+		"--issuer=https://issuer.example", "--client-id=cid", "--format=json",
+	}, &stderr, Env{Getenv: noEnv}, testGrants())
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.Format != OutputFormatJSON {
+		t.Errorf("Format = %q, want %q", cfg.Format, OutputFormatJSON)
+	}
+
+	cfg, err = Parse([]string{
+		"--issuer=https://issuer.example", "--client-id=cid", "--format=exec-credential",
+	}, &stderr, Env{Getenv: noEnv}, testGrants())
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.Format != OutputFormatExecCredential {
+		t.Errorf("Format = %q, want %q", cfg.Format, OutputFormatExecCredential)
+	}
+}
+
+func TestParse_Format_Invalid(t *testing.T) {
+	var stderr bytes.Buffer
+	_, err := Parse([]string{
+		"--issuer=https://issuer.example", "--client-id=cid", "--format=bogus",
+	}, &stderr, Env{Getenv: noEnv}, testGrants())
+	if err == nil {
+		t.Fatal("expected error for invalid --format")
+	}
+}
+
+func TestParse_Format_AllAliasesToJSON(t *testing.T) {
+	var stderr bytes.Buffer
+	cfg, err := Parse([]string{
+		"--issuer=https://issuer.example", "--client-id=cid", "--all",
+	}, &stderr, Env{Getenv: noEnv}, testGrants())
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.Format != OutputFormatJSON {
+		t.Errorf("Format = %q, want %q (--all alias)", cfg.Format, OutputFormatJSON)
+	}
+}
+
+func TestParse_Format_ExplicitFormatWinsOverAll(t *testing.T) {
+	var stderr bytes.Buffer
+	cfg, err := Parse([]string{
+		"--issuer=https://issuer.example", "--client-id=cid", "--all", "--format=token",
+	}, &stderr, Env{Getenv: noEnv}, testGrants())
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.Format != OutputFormatToken {
+		t.Errorf("Format = %q, want %q (explicit --format wins over --all)", cfg.Format, OutputFormatToken)
+	}
+}
+
+func TestParse_Format_EnvVar(t *testing.T) {
+	env := envFrom(map[string]string{"OIDC_TOKEN_FORMAT": "exec-credential"})
+	var stderr bytes.Buffer
+	cfg, err := Parse([]string{
+		"--issuer=https://issuer.example", "--client-id=cid",
+	}, &stderr, Env{Getenv: env}, testGrants())
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.Format != OutputFormatExecCredential {
+		t.Errorf("Format = %q, want env override %q", cfg.Format, OutputFormatExecCredential)
+	}
+}
+
 func TestParse_TokenStoreDirOverride(t *testing.T) {
 	var stderr bytes.Buffer
 	cfg, err := Parse([]string{

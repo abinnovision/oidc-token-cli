@@ -15,6 +15,10 @@ const (
 	TokenTypeIDToken     TokenType = "id_token"
 )
 
+// DefaultExecCredentialAPIVersion is used by WriteExecCredential when no
+// apiVersion is supplied.
+const DefaultExecCredentialAPIVersion = "client.authentication.k8s.io/v1"
+
 // Result carries whatever credential material a successful run produced.
 type Result struct {
 	AccessToken  string
@@ -87,4 +91,64 @@ func WriteAll(w io.Writer, r Result) error {
 	}
 	_, err = w.Write(b)
 	return err
+}
+
+// WriteExecCredential writes a Kubernetes client.authentication.k8s.io
+// ExecCredential document to w, with the selected token as status.token. It
+// writes nothing to w on error (the document is built in memory first, then
+// written in one call). apiVersion defaults to
+// DefaultExecCredentialAPIVersion when empty.
+func WriteExecCredential(w io.Writer, r Result, tt TokenType, apiVersion string) error {
+	token, ok := Select(r, tt)
+	if !ok {
+		return fmt.Errorf("output: no %s available", tt)
+	}
+	if apiVersion == "" {
+		apiVersion = DefaultExecCredentialAPIVersion
+	}
+
+	status := map[string]any{"token": token}
+	if !r.Expiry.IsZero() {
+		status["expirationTimestamp"] = r.Expiry.UTC().Format(time.RFC3339)
+	}
+	doc := map[string]any{
+		"apiVersion": apiVersion,
+		"kind":       "ExecCredential",
+		"status":     status,
+	}
+
+	b, err := json.Marshal(doc)
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(b)
+	return err
+}
+
+// execCredentialEnv is the shape of $KUBERNETES_EXEC_INFO that kubectl sets
+// when invoking an exec credential plugin.
+type execCredentialEnv struct {
+	APIVersion string `json:"apiVersion"`
+}
+
+// ExecCredentialAPIVersion resolves the apiVersion for WriteExecCredential
+// from $KUBERNETES_EXEC_INFO, falling back to DefaultExecCredentialAPIVersion
+// when the env var is unset, unparsable, or lacks an apiVersion field.
+// getenv may be nil.
+func ExecCredentialAPIVersion(getenv func(string) string) string {
+	if getenv == nil {
+		return DefaultExecCredentialAPIVersion
+	}
+	raw := getenv("KUBERNETES_EXEC_INFO")
+	if raw == "" {
+		return DefaultExecCredentialAPIVersion
+	}
+	var info execCredentialEnv
+	if err := json.Unmarshal([]byte(raw), &info); err != nil {
+		return DefaultExecCredentialAPIVersion
+	}
+	if info.APIVersion == "" {
+		return DefaultExecCredentialAPIVersion
+	}
+	return info.APIVersion
 }
