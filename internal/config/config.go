@@ -183,8 +183,7 @@ func Parse(args []string, stderr io.Writer, env Env, grants []grant.Grant) (*Con
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, "Usage: oidc-token [flags]\n\n")
 		fmt.Fprintf(stderr, "Mint and print an OIDC token for a public or confidential OIDC client.\n\n")
-		fmt.Fprintf(stderr, "Flags:\n")
-		fs.PrintDefaults()
+		printGroupedUsage(stderr, fs)
 	}
 
 	cfg := &Config{
