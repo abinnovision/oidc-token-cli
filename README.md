@@ -64,7 +64,8 @@ oidc-token \
   [--client-assertion-audience AUD] \
   [--subject-token TOKEN | --subject-token-file FILE] [--subject-token-type TYPE] \
   [--subject-token-source github-actions] \
-  [--requested-token-type TYPE] [--resource URI ...]
+  [--requested-token-type TYPE] [--resource URI ...] \
+  [--extra key=value ...]
 ```
 
 #### Core flags
@@ -94,6 +95,7 @@ oidc-token \
 | `--all` | `false` | Print a JSON document instead of a bare token. |
 | `--logout` | `false` | Clear the cached entry for `--issuer`/`--client-id` and exit; no login or refresh is attempted. |
 | `--config` | *(none)* | Optional JSON config file. |
+| `--extra` | *(none)* | Repeatable `key=value` pair forwarded to the token endpoint. In a config file, set as an `"extra"` object. |
 
 #### Confidential client flags
 
@@ -116,11 +118,12 @@ oidc-token \
 | `--requested-token-type` | *(none)* | RFC 8693 `requested_token_type`; omitted from the request entirely when unset. |
 | `--resource` | *(none)* | RFC 8693 `resource` target URI; repeatable for multiple resource params. |
 
-Every flag (except `--config`, `--client-secret-file`, `--subject-token-file`,
-and `--resource`) has an `OIDC_TOKEN_*` env var (e.g. `--issuer` becomes
-`OIDC_TOKEN_ISSUER`). Prefer `OIDC_TOKEN_CLIENT_SECRET` or
-`--client-secret-file` over `--client-secret` on the command line — the
-bare flag can leak into shell history or process listings.
+Every flag except `--config`, `--client-secret-file`, `--subject-token-file`,
+`--resource`, `--all`, `--redirect`, `--requested-token-type`, and `--extra`
+has an `OIDC_TOKEN_*` env var (e.g. `--issuer` becomes `OIDC_TOKEN_ISSUER`).
+Prefer `OIDC_TOKEN_CLIENT_SECRET` or `--client-secret-file` over
+`--client-secret` on the command line -- the bare flag can leak into shell
+history or process listings.
 
 Precedence: defaults < env < `--config` file < explicit flags.
 
@@ -217,14 +220,10 @@ Because this source fetches an ID token, `--subject-token-type` defaults to
 `...:access_token`), so it doesn't need to be set explicitly.
 
 `--audience` doubles as the GitHub Actions `audience` query parameter for
-the fetched ID token (matching how GitHub Actions' `audience` and the
-eventual token-exchange `audience` are typically the same value in
-practice).
+the fetched ID token.
 
-This flag only supplies the *subject token* — it does not make the token
-endpoint RFC 8693-compliant. The receiving IdP/broker must still implement
-RFC 8693 §2.1 token exchange for the full flow to work; this flag has no
-effect on that.
+This flag only supplies the *subject token*; the receiving IdP/broker must
+still implement RFC 8693 §2.1 token exchange for the full flow to work.
 
 ### Token store
 
@@ -242,13 +241,9 @@ SHA-256 hash of the pair so those values don't leak into keys/filenames.
 The file store lives at `--token-store-dir` (default `$XDG_CACHE_HOME/oidc-token`
 or `~/.cache/oidc-token`); files are `0600`, written atomically, and
 refreshes run under an advisory `flock` so concurrent invocations converge
-on one winner instead of each re-authenticating.
-
-`auto` mode reuses that same `flock` for cross-process coordination even
-when the token payload lives in the keychain; `keychain`-enforce mode has
-no cross-process lock (OS keychains expose no such primitive), so
-concurrent invocations against the same profile aren't fully serialized
-in that mode.
+on one winner instead of each re-authenticating. `auto` mode reuses that
+lock even when the payload lives in the keychain; `keychain`-only mode has
+no cross-process lock.
 
 There's no migration between backends: switching an existing profile from
 `file` to `auto`/`keychain` on a machine with a working keychain triggers
@@ -256,8 +251,7 @@ one fresh login, since a keychain miss isn't treated as "check the file
 next." Use `--logout` to explicitly clear a cached entry (keychain items
 can't be removed with `rm` the way file entries can).
 
-No cgo dependency either way — the keychain backend shells out to
-`security` on macOS and speaks D-Bus directly on Linux.
+No cgo dependency either way.
 
 ### Bootstrap model
 
@@ -347,18 +341,19 @@ go test ./...
 golangci-lint run
 ```
 
-Every push to `main` runs CI; if it's green, [svu](https://github.com/caarlos0/svu)
-derives the next semver from conventional commits and, on a version bump,
-`goreleaser release --clean` builds darwin/linux × amd64/arm64 archives
-plus a GitHub release and a Homebrew formula update in
+Every push to `main` runs CI. [release-please](https://github.com/googleapis/release-please)
+opens a release PR tracking conventional commits; merging it creates a
+draft GitHub Release with the next semver tag. GoReleaser then adopts
+that draft (`mode: append`, `use_existing_draft: true`), builds
+darwin/linux x amd64/arm64 archives, attaches them plus checksums, and
+publishes the release. The Homebrew cask is pushed to
 [`abinnovision/homebrew-tap`](https://github.com/abinnovision/homebrew-tap)
-(push token minted per-release by running `oidc-token-cli` itself against
-gh-token-broker's token-exchange endpoint, not a stored PAT).
+using a short-lived token minted per-release via `oidc-token-cli` itself
+against gh-token-broker's token-exchange endpoint (not a stored PAT).
 
-`.goreleaser.yaml` intentionally uses the `brews` key (not
-`homebrew_casks` — casks get Gatekeeper-quarantined on an unsigned binary);
-`goreleaser check` will report a `brews` deprecation warning, which is
-expected.
+`.goreleaser.yaml` uses the `homebrew_casks` key with a post-install hook
+that strips the macOS quarantine xattr (`com.apple.quarantine`) from the
+unsigned binary.
 
 ## License
 
