@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -59,16 +61,6 @@ func failTokenExchange(t *testing.T) newTokenExchangeFunc {
 	}
 }
 
-// failResolveSubjectToken returns a resolveSubjectTokenFunc that fails the
-// test if invoked, for tests using the manual (default) subject-token
-// source, which must never call the resolver.
-func failResolveSubjectToken(t *testing.T) resolveSubjectTokenFunc {
-	return func(ctx context.Context, cfg *config.Config) (string, error) {
-		t.Fatal("must not resolve a subject token for --subject-token-source=\"\" (manual)")
-		return "", nil
-	}
-}
-
 func TestRun_Success_BareTokenExactBytes_EmptyStderr_ExitZero(t *testing.T) {
 	dir := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -78,7 +70,7 @@ func TestRun_Success_BareTokenExactBytes_EmptyStderr_ExitZero(t *testing.T) {
 		"--token-store-dir=" + filepath.Join(dir, "cache"), "--token-store=file",
 	}, &stdout, &stderr, func(cfg *config.Config) runner.TokenSource {
 		return fakeSource{loginResult: output.Result{AccessToken: "the-access-token", RefreshToken: "rt"}}
-	}, failTokenExchange(t), failResolveSubjectToken(t))
+	}, failTokenExchange(t))
 
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr.String())
@@ -104,7 +96,7 @@ func TestRun_TokenStoreNone_NeverPersistsAcrossRuns(t *testing.T) {
 		code := run([]string{
 			"--issuer=https://issuer.example", "--client-id=cid",
 			"--token-store=none", "--token-store-dir=" + storeDir,
-		}, &stdout, &stderr, newSource, failTokenExchange(t), failResolveSubjectToken(t))
+		}, &stdout, &stderr, newSource, failTokenExchange(t))
 
 		if code != 0 {
 			t.Fatalf("run %d: exit code = %d, want 0 (stderr: %s)", i, code, stderr.String())
@@ -130,7 +122,7 @@ func TestRun_Success_All_ValidJSON(t *testing.T) {
 		"--token-store-dir=" + filepath.Join(dir, "cache"), "--token-store=file",
 	}, &stdout, &stderr, func(cfg *config.Config) runner.TokenSource {
 		return fakeSource{loginResult: output.Result{AccessToken: "at", IDToken: "it", RefreshToken: "rt"}}
-	}, failTokenExchange(t), failResolveSubjectToken(t))
+	}, failTokenExchange(t))
 
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr.String())
@@ -150,7 +142,7 @@ func TestRun_LoginFailure_ExitNonZero_EmptyStdout_NonEmptyStderr(t *testing.T) {
 		"--token-store-dir=" + filepath.Join(dir, "cache"), "--token-store=file",
 	}, &stdout, &stderr, func(cfg *config.Config) runner.TokenSource {
 		return fakeSource{loginErr: errors.New("mock issuer rejected login")}
-	}, failTokenExchange(t), failResolveSubjectToken(t))
+	}, failTokenExchange(t))
 
 	if code == 0 {
 		t.Fatal("exit code = 0, want non-zero on failure")
@@ -173,7 +165,7 @@ func TestRun_NoViableGrant_ExitNonZero_EmptyStdout(t *testing.T) {
 		"--token-store-dir=" + filepath.Join(dir, "cache"), "--token-store=file",
 	}, &stdout, &stderr, func(cfg *config.Config) runner.TokenSource {
 		return fakeSource{loginErr: errors.New(diagnostic)}
-	}, failTokenExchange(t), failResolveSubjectToken(t))
+	}, failTokenExchange(t))
 
 	if code == 0 {
 		t.Fatal("exit code = 0, want non-zero when no grant is viable")
@@ -192,7 +184,7 @@ func TestRun_MissingRequiredFlags_ExitNonZero_EmptyStdout(t *testing.T) {
 	code := run(nil, &stdout, &stderr, func(cfg *config.Config) runner.TokenSource {
 		t.Fatal("must not construct a TokenSource when config validation fails")
 		return nil
-	}, failTokenExchange(t), failResolveSubjectToken(t))
+	}, failTokenExchange(t))
 
 	if code == 0 {
 		t.Fatal("exit code = 0, want non-zero when --issuer/--client-id are missing")
@@ -211,7 +203,7 @@ func TestRun_Help_ExitZero_EmptyStdout(t *testing.T) {
 	code := run([]string{"--help"}, &stdout, &stderr, func(cfg *config.Config) runner.TokenSource {
 		t.Fatal("must not construct a TokenSource for --help")
 		return nil
-	}, failTokenExchange(t), failResolveSubjectToken(t))
+	}, failTokenExchange(t))
 
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0 for --help", code)
@@ -230,7 +222,7 @@ func TestRun_RequestedTokenTypeMissing_ExitNonZero_EmptyStdout(t *testing.T) {
 		"--token-store-dir=" + filepath.Join(dir, "cache"), "--token-store=file",
 	}, &stdout, &stderr, func(cfg *config.Config) runner.TokenSource {
 		return fakeSource{loginResult: output.Result{AccessToken: "at-only"}}
-	}, failTokenExchange(t), failResolveSubjectToken(t))
+	}, failTokenExchange(t))
 
 	if code == 0 {
 		t.Fatal("exit code = 0, want non-zero when the requested token type is absent")
@@ -279,7 +271,7 @@ func TestRun_Logout_ClearsCacheEntry_ExitZero(t *testing.T) {
 		"--token-store=file", "--token-store-dir=" + cacheDir,
 	}, &stdout, &stderr, func(cfg *config.Config) runner.TokenSource {
 		return fakeSource{loginResult: output.Result{AccessToken: "at", RefreshToken: "rt"}}
-	}, failTokenExchange(t), failResolveSubjectToken(t))
+	}, failTokenExchange(t))
 	if code != 0 {
 		t.Fatalf("bootstrap exit code = %d (stderr: %s)", code, stderr.String())
 	}
@@ -292,7 +284,7 @@ func TestRun_Logout_ClearsCacheEntry_ExitZero(t *testing.T) {
 	}, &stdout, &stderr, func(cfg *config.Config) runner.TokenSource {
 		t.Fatal("--logout must not construct a TokenSource")
 		return nil
-	}, failTokenExchange(t), failResolveSubjectToken(t))
+	}, failTokenExchange(t))
 	if code != 0 {
 		t.Fatalf("logout exit code = %d, want 0 (stderr: %s)", code, stderr.String())
 	}
@@ -310,7 +302,7 @@ func TestRun_Logout_ClearsCacheEntry_ExitZero(t *testing.T) {
 	}, &stdout, &stderr, func(cfg *config.Config) runner.TokenSource {
 		loginCalled = true
 		return fakeSource{loginResult: output.Result{AccessToken: "at-2", RefreshToken: "rt-2"}}
-	}, failTokenExchange(t), failResolveSubjectToken(t))
+	}, failTokenExchange(t))
 	if code != 0 {
 		t.Fatalf("post-logout exit code = %d (stderr: %s)", code, stderr.String())
 	}
@@ -364,7 +356,7 @@ func TestRun_TokenExchange_BypassesCacheAndStore(t *testing.T) {
 		// A cache dir under a path that doesn't exist: if token-exchange
 		// ever touched the store, buildStore/cache writes would fail loudly.
 		"--token-store-dir=" + filepath.Join(dir, "does-not-exist", "cache"), "--token-store=file",
-	}, &stdout, &stderr, newSource, newTokenExchange, failResolveSubjectToken(t))
+	}, &stdout, &stderr, newSource, newTokenExchange)
 
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr.String())
@@ -392,7 +384,7 @@ func TestRun_TokenExchange_All_ValidJSON(t *testing.T) {
 	}, &stdout, &stderr, func(cfg *config.Config) runner.TokenSource {
 		t.Fatal("must not construct a runner.TokenSource for --grant-type=token-exchange")
 		return nil
-	}, newTokenExchange, failResolveSubjectToken(t))
+	}, newTokenExchange)
 
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr.String())
@@ -419,7 +411,7 @@ func TestRun_TokenExchange_Failure_ExitNonZero_EmptyStdout(t *testing.T) {
 	}, &stdout, &stderr, func(cfg *config.Config) runner.TokenSource {
 		t.Fatal("must not construct a runner.TokenSource for --grant-type=token-exchange")
 		return nil
-	}, newTokenExchange, failResolveSubjectToken(t))
+	}, newTokenExchange)
 
 	if code == 0 {
 		t.Fatal("exit code = 0, want non-zero on token-exchange failure")
@@ -432,15 +424,20 @@ func TestRun_TokenExchange_Failure_ExitNonZero_EmptyStdout(t *testing.T) {
 func TestRun_TokenExchange_GitHubActionsSource_ResolvesAndExchanges(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"value":"resolved-jwt"}`))
+	}))
+	defer srv.Close()
+
+	t.Setenv("ACTIONS_ID_TOKEN_REQUEST_URL", srv.URL)
+	t.Setenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN", "req-token")
+
 	var gotSubjectToken string
 	newTokenExchange := func(cfg *config.Config) tokenExchanger {
 		return fakeTokenExchangeFunc(func(ctx context.Context, subjectToken, subjectTokenType, requestedTokenType string, resources []string) (output.Result, error) {
 			gotSubjectToken = subjectToken
 			return output.Result{AccessToken: "exchanged-token"}, nil
 		})
-	}
-	resolveSubjectToken := func(ctx context.Context, cfg *config.Config) (string, error) {
-		return "resolved-jwt", nil
 	}
 
 	code := run([]string{
@@ -449,7 +446,7 @@ func TestRun_TokenExchange_GitHubActionsSource_ResolvesAndExchanges(t *testing.T
 	}, &stdout, &stderr, func(cfg *config.Config) runner.TokenSource {
 		t.Fatal("must not construct a runner.TokenSource for --grant-type=token-exchange")
 		return nil
-	}, newTokenExchange, resolveSubjectToken)
+	}, newTokenExchange)
 
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr.String())
@@ -465,9 +462,9 @@ func TestRun_TokenExchange_GitHubActionsSource_ResolvesAndExchanges(t *testing.T
 func TestRun_TokenExchange_GitHubActionsSource_ResolveFailure_ExitNonZero_EmptyStdout(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	resolveSubjectToken := func(ctx context.Context, cfg *config.Config) (string, error) {
-		return "", errors.New("subjecttoken: missing $ACTIONS_ID_TOKEN_REQUEST_URL")
-	}
+	// No ACTIONS_ID_TOKEN_REQUEST_URL/TOKEN set: FetchGitHubActions fails
+	// fast with the missing-env-var error before ever attempting a
+	// network call.
 
 	code := run([]string{
 		"--issuer=https://issuer.example", "--client-id=cid", "--grant-type=token-exchange",
@@ -475,7 +472,7 @@ func TestRun_TokenExchange_GitHubActionsSource_ResolveFailure_ExitNonZero_EmptyS
 	}, &stdout, &stderr, func(cfg *config.Config) runner.TokenSource {
 		t.Fatal("must not construct a runner.TokenSource for --grant-type=token-exchange")
 		return nil
-	}, failTokenExchange(t), resolveSubjectToken)
+	}, failTokenExchange(t))
 
 	if code == 0 {
 		t.Fatal("exit code = 0, want non-zero when subject-token resolution fails")

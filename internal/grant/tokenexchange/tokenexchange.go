@@ -9,15 +9,15 @@ import (
 
 	"github.com/abinnovision/oidc-token-cli/internal/grant"
 	"github.com/abinnovision/oidc-token-cli/internal/output"
+	"github.com/abinnovision/oidc-token-cli/internal/subjecttoken"
 )
 
 // Token-type URNs from RFC 8693 used as defaults for subject_token_type.
 const (
-	defaultSubjectTokenType              = "urn:ietf:params:oauth:token-type:access_token" //nolint:gosec // RFC 8693 token-type URN, not a credential
-	defaultSubjectTokenTypeGitHubActions = "urn:ietf:params:oauth:token-type:id_token"     //nolint:gosec // RFC 8693 token-type URN, not a credential
-	envSubjectToken                      = "OIDC_TOKEN_SUBJECT_TOKEN"                      //nolint:gosec // env-var name, not a credential
-	envSubjectTokenType                  = "OIDC_TOKEN_SUBJECT_TOKEN_TYPE"                 //nolint:gosec // env-var name, not a credential
-	envSubjectTokenSource                = "OIDC_TOKEN_SUBJECT_TOKEN_SOURCE"               //nolint:gosec // env-var name, not a credential
+	defaultSubjectTokenType = "urn:ietf:params:oauth:token-type:access_token" //nolint:gosec // RFC 8693 token-type URN, not a credential
+	envSubjectToken         = "OIDC_TOKEN_SUBJECT_TOKEN"                      //nolint:gosec // env-var name, not a credential
+	envSubjectTokenType     = "OIDC_TOKEN_SUBJECT_TOKEN_TYPE"                 //nolint:gosec // env-var name, not a credential
+	envSubjectTokenSource   = "OIDC_TOKEN_SUBJECT_TOKEN_SOURCE"               //nolint:gosec // env-var name, not a credential
 )
 
 // TokenExchange implements the RFC 8693 token exchange grant.
@@ -28,6 +28,7 @@ type TokenExchange struct {
 	RequestedTokenType string
 	Resources          []string
 	SubjectTokenSource string
+	Audience           string
 
 	// Private flag pointers, populated by RegisterFlags.
 	subjectToken       *string
@@ -36,11 +37,13 @@ type TokenExchange struct {
 	requestedTokenType *string
 	resources          stringSliceFlag
 	subjectTokenSource *string
+
+	sources []subjecttoken.Source
 }
 
 var _ grant.Grant = (*TokenExchange)(nil)
 
-func New() *TokenExchange { return &TokenExchange{} }
+func New(sources []subjecttoken.Source) *TokenExchange { return &TokenExchange{sources: sources} }
 
 func (g *TokenExchange) Name() string { return "token-exchange" }
 
@@ -132,8 +135,8 @@ func (g *TokenExchange) Finalize(explicit map[string]bool, env grant.EnvFunc, fc
 
 	// 5. Default subject_token_type once the source is known.
 	if g.SubjectTokenType == "" {
-		if g.SubjectTokenSource == "github-actions" {
-			g.SubjectTokenType = defaultSubjectTokenTypeGitHubActions
+		if src := subjecttoken.FindSource(g.sources, g.SubjectTokenSource); src != nil {
+			g.SubjectTokenType = src.DefaultTokenType()
 		} else {
 			g.SubjectTokenType = defaultSubjectTokenType
 		}
@@ -143,10 +146,9 @@ func (g *TokenExchange) Finalize(explicit map[string]bool, env grant.EnvFunc, fc
 }
 
 func (g *TokenExchange) Validate() error {
-	switch g.SubjectTokenSource {
-	case "", "github-actions":
-	default:
-		return fmt.Errorf("config: invalid --subject-token-source %q (want \"\"|github-actions)", g.SubjectTokenSource)
+	if g.SubjectTokenSource != "" && subjecttoken.FindSource(g.sources, g.SubjectTokenSource) == nil {
+		return fmt.Errorf("config: invalid --subject-token-source %q (want \"\"|%s)",
+			g.SubjectTokenSource, strings.Join(subjecttoken.SourceNames(g.sources), "|"))
 	}
 	if g.SubjectTokenSource != "" && g.SubjectToken != "" {
 		return fmt.Errorf("config: --subject-token-source is mutually exclusive with --subject-token/--subject-token-file/$%s", envSubjectToken)
@@ -179,6 +181,20 @@ func (g *TokenExchange) Bridge() grant.ConfigBridge {
 
 func (g *TokenExchange) Execute(ctx context.Context, p grant.Provider, opts grant.ExecOpts) (output.Result, error) {
 	return p.TokenExchange(ctx, opts.Scope, g.SubjectToken, g.SubjectTokenType, g.RequestedTokenType, g.Resources, opts.ExtraFields)
+}
+
+// ResolveSubjectToken returns g.SubjectToken as-is if no
+// --subject-token-source was configured, otherwise it fetches the
+// subject_token from the configured Source.
+func (g *TokenExchange) ResolveSubjectToken(ctx context.Context) (string, error) {
+	if g.SubjectTokenSource == "" {
+		return g.SubjectToken, nil
+	}
+	src := subjecttoken.FindSource(g.sources, g.SubjectTokenSource)
+	if src == nil {
+		return "", fmt.Errorf("config: unsupported --subject-token-source %q", g.SubjectTokenSource)
+	}
+	return src.Fetch(ctx, g.Audience)
 }
 
 // stringSliceFlag implements flag.Value for a repeatable string flag
