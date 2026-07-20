@@ -154,7 +154,6 @@ type Config struct {
 	SubjectTokenSource SubjectTokenSource
 }
 
-
 // Env is the subset of the process environment config.Parse reads from,
 // injected so tests don't depend on real process env or $HOME.
 type Env struct {
@@ -167,7 +166,6 @@ func (e Env) get(key string) string {
 	}
 	return e.Getenv(key)
 }
-
 
 // Parse builds a Config from, in ascending priority: defaults, environment
 // variables, an optional --config JSON file, then explicitly-set flags.
@@ -464,7 +462,6 @@ func (c *Config) resolvePrivateKey() error {
 	}
 	return fmt.Errorf("config: --private-key-file %q is not a supported PEM-encoded private key (want PKCS#1, PKCS#8, or EC)", c.PrivateKeyPath)
 }
-
 
 // extraFieldsFlag implements flag.Value for --extra key=value, a repeatable
 // flag that accumulates into url.Values.
