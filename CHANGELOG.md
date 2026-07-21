@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.10.0](https://github.com/abinnovision/oidc-token-cli/compare/v0.9.0...v0.10.0) (2026-07-20)
+
+
+### Features
+
+* add --format selector with real Kubernetes ExecCredential output ([#39](https://github.com/abinnovision/oidc-token-cli/issues/39)) ([3353b68](https://github.com/abinnovision/oidc-token-cli/commit/3353b68e9a8675f91a4c391c6391e9254713cd89))
+
+
+### Bug Fixes
+
+* suppress gosec G101 false positive on exec-credential format ([#40](https://github.com/abinnovision/oidc-token-cli/issues/40)) ([a12a0c5](https://github.com/abinnovision/oidc-token-cli/commit/a12a0c5e2b4db6b6c5610f0a17150d0f9d817862))
+
 ## [0.9.0](https://github.com/abinnovision/oidc-token-cli/compare/v0.8.0...v0.9.0) (2026-07-20)
 
 
