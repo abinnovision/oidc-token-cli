@@ -1,43 +1,53 @@
 # oidc-token-cli
 
-A small CLI that fetches an OIDC token and prints it as a bare string —
+A small CLI that fetches an OIDC token and prints it as a bare string,
 built as a drop-in `exec` credential provider for `frpc`, `kubectl`,
 `curl`, or CI pipelines.
 
-Nothing is hardcoded to a specific issuer or client: every endpoint is
-resolved at runtime from `/.well-known/openid-configuration`, and the
-interactive grant (`authcode+PKCE` or `device-code`) is auto-selected based
-on what the issuer supports and what the environment can do (browser vs.
-attended terminal). Tokens are cached per `(issuer, client_id)` and
-silently refreshed; a browser or device-code prompt is only shown when the
-cache is cold.
+Nothing is hardcoded to a specific issuer or client:
 
-## Contract
+- **Discovery.** Endpoints are resolved at runtime via OpenID Connect
+  Discovery from the issuer's `/.well-known/openid-configuration`.
+- **Interactive grants.** Authorization code (RFC 6749) with PKCE (RFC 7636)
+  over a loopback redirect (RFC 8252), or the device authorization grant
+  (RFC 8628); auto-selected from what the issuer advertises and whether the
+  environment has a browser or an attended terminal.
+- **Token exchange.** RFC 8693, for swapping an existing subject token.
+- **Confidential clients.** `client_secret_basic`/`client_secret_post`, or a
+  `private_key_jwt` assertion (RFC 7523).
+- **Caching.** Tokens are cached per `(issuer, client_id)` and silently
+  refreshed; a browser or device-code prompt is only shown when the cache is
+  cold.
 
-- **Success:** exactly the token bytes on stdout (no trailing newline), exit 0.
-- **Failure:** non-zero exit, message on stderr, empty stdout — never a
-  partial or placeholder token.
-- Public client by default (PKCE, no secret). Confidential clients are
-  opt-in via `--client-auth-method` — see
-  [Confidential clients](#confidential-clients). mTLS client
-  authentication (`tls_client_auth`) is not supported.
+## Output
+
+- **Success:** exactly the token on stdout (no trailing newline), exit 0.
+- **Failure:** non-zero exit, message on stderr, empty stdout.
 
 ## Install
+
+Homebrew (macOS/Linux):
 
 ```sh
 brew install abinnovision/tap/oidc-token
 ```
 
-Or download a release binary (darwin/linux, amd64/arm64) from the
+With the Go toolchain:
+
+```sh
+go install github.com/abinnovision/oidc-token-cli/cmd/oidc-token@latest
+```
+
+Or download a prebuilt binary (darwin/linux, amd64/arm64) from the
 [releases page](https://github.com/abinnovision/oidc-token-cli/releases).
 
 ## Quick start
 
 ```sh
-# First run: opens a browser (or prints a device code), then caches the token.
+# First run: opens a browser or prints a device code, then caches the token.
 oidc-token --issuer https://id.example.com/ --client-id my-public-client
 
-# Every run after: served from cache, silently refreshed.
+# Later runs: served from cache, silently refreshed.
 oidc-token --issuer https://id.example.com/ --client-id my-public-client
 ```
 
@@ -76,7 +86,7 @@ oidc-token \
 | `--issuer` | *(required)* | OIDC issuer URL (HTTPS, except loopback in tests). Discovery's `issuer` field must match exactly. |
 | `--client-id` | *(required)* | OAuth2/OIDC client ID. |
 | `--scope` | `openid offline_access` | Space-separated scopes. |
-| `--audience` | *(empty)* | Expected `aud` claim — required if the relying party checks audience (e.g. frp's `auth.oidc.audience`). |
+| `--audience` | *(empty)* | Expected `aud` claim, required if the relying party checks audience (e.g. frp's `auth.oidc.audience`). |
 | `--grant-type` | `auto` | `auto`, `authcode`, `device-code`, or `token-exchange`. See [Grant selection](#grant-selection) and [Token exchange](#token-exchange-rfc-8693). |
 | `--token-type` | `access_token` | Which field bare mode prints. |
 
@@ -93,7 +103,7 @@ oidc-token \
 |---|---|---|
 | `--redirect` | `0` (ephemeral) | Fixed loopback port for the authcode callback, if your IdP requires an exact redirect URI. |
 | `--non-interactive` | `false` | Never emit a device-code prompt; authcode+browser is still allowed if a display is available. |
-| `--format` | `token` | `token`, `json`, or `exec-credential`. See [kubectl ExecCredential](#kubectl-execcredential---format-exec-credential). |
+| `--format` | `token` | `token`, `json`, or `exec-credential`. See [kubectl](#kubectl). |
 | `--all` | `false` | Deprecated: alias for `--format=json`. Print a JSON document instead of a bare token. Ignored when `--format` is set explicitly. |
 | `--logout` | `false` | Clear the cached entry for `--issuer`/`--client-id` and exit; no login or refresh is attempted. |
 | `--config` | *(none)* | Optional JSON config file. |
@@ -120,11 +130,9 @@ oidc-token \
 | `--requested-token-type` | *(none)* | RFC 8693 `requested_token_type`; omitted from the request entirely when unset. |
 | `--resource` | *(none)* | RFC 8693 `resource` target URI; repeatable for multiple resource params. |
 
-Every flag except `--config`, `--client-secret-file`, `--subject-token-file`,
-`--resource`, `--all`, `--redirect`, `--requested-token-type`, and `--extra`
-has an `OIDC_TOKEN_*` env var (e.g. `--issuer` becomes `OIDC_TOKEN_ISSUER`).
-Prefer `OIDC_TOKEN_CLIENT_SECRET` or `--client-secret-file` over
-`--client-secret` on the command line -- the bare flag can leak into shell
+Most flags also have an `OIDC_TOKEN_*` env var (e.g. `--issuer` becomes
+`OIDC_TOKEN_ISSUER`). Prefer `OIDC_TOKEN_CLIENT_SECRET` or
+`--client-secret-file` over `--client-secret`, which can leak into shell
 history or process listings.
 
 Precedence: defaults < env < `--config` file < explicit flags.
@@ -141,8 +149,7 @@ what the environment supports:
 
 Authcode is tried first when both are viable. If the client is rejected
 for the grant it tried (`unauthorized_client`/`invalid_grant` at the
-authorization endpoint), it falls back to the other viable grant once —
-capped at 2 attempts total, no cycling back.
+authorization endpoint), it falls back to the other viable grant once.
 
 `--grant-type=authcode` or `=device-code` forces one grant and fails fast
 if it isn't viable, with a diagnostic describing what the IdP offers and
@@ -155,20 +162,18 @@ authentication on token requests. Setting `--client-auth-method` switches
 it to a confidential client for all three grants (authcode, device-code,
 refresh):
 
-- **`client_secret_basic`** / **`client_secret_post`** — send
+- **`client_secret_basic`** / **`client_secret_post`**, send
   `--client-secret` (or, preferably, `--client-secret-file`/
   `$OIDC_TOKEN_CLIENT_SECRET`) as HTTP Basic auth or a POST body param,
   respectively.
-- **`private_key_jwt`** (RFC 7523) — sign a fresh, short-lived JWT
+- **`private_key_jwt`** (RFC 7523), sign a fresh, short-lived JWT
   assertion per token request with `--private-key-file` (PEM,
   PKCS#1/PKCS#8/EC). `--private-key-id` sets an optional `kid` header for
   issuers that select the verification key from a registered JWKS.
   `--client-assertion-audience` overrides the assertion's `aud` claim if
   your issuer expects something other than the discovered token endpoint
-  (conventions vary between IdPs — check yours if authentication fails
+  (conventions vary between IdPs, check yours if authentication fails
   with an audience-related error).
-
-Not supported: mTLS client authentication (`tls_client_auth`).
 
 ### Token exchange (RFC 8693)
 
@@ -201,21 +206,14 @@ the wrong one.
 
 By default `--subject-token` must be supplied manually. Setting
 `--subject-token-source=github-actions` instead fetches it automatically
-from GitHub Actions' native OIDC provider — the same
+from GitHub Actions' native OIDC provider, the same
 `ACTIONS_ID_TOKEN_REQUEST_URL`/`ACTIONS_ID_TOKEN_REQUEST_TOKEN` mechanism
 GitHub injects into any job with `permissions: id-token: write`. This is
 mutually exclusive with `--subject-token`/`--subject-token-file`/
 `$OIDC_TOKEN_SUBJECT_TOKEN` and only valid with
-`--grant-type=token-exchange`.
-
-```sh
-oidc-token \
-  --issuer https://id.example.com/ \
-  --client-id my-token-exchange-client \
-  --grant-type token-exchange \
-  --subject-token-source github-actions \
-  --audience gtb-abinnovision
-```
+`--grant-type=token-exchange`. See the
+[GitHub Actions](#github-actions-token-exchange) recipe for a runnable
+example.
 
 Because this source fetches an ID token, `--subject-token-type` defaults to
 `urn:ietf:params:oauth:token-type:id_token` here (rather than the usual
@@ -235,9 +233,9 @@ SHA-256 hash of the pair so those values don't leak into keys/filenames.
 
 | `--token-store` | Behavior |
 |---|---|
-| `auto` (default) | Try the OS keychain (macOS Keychain, Linux Secret Service over D-Bus) first; fall back to the plaintext file store only when the keychain backend is unavailable (no daemon reachable) — not on a plain cache miss. Logs a one-line notice to stderr the first time it falls back. |
+| `auto` (default) | Try the OS keychain (macOS Keychain, Linux Secret Service over D-Bus) first; fall back to the plaintext file store only when the keychain backend is unavailable (no daemon reachable), not on a plain cache miss. Logs a one-line notice to stderr the first time it falls back. |
 | `keychain` | OS keychain only, no fallback. Fails fast at startup if no keychain backend is reachable. |
-| `file` | Plaintext JSON file only — this CLI's original behavior, no cgo, works anywhere. |
+| `file` | Plaintext JSON file only, this CLI's original behavior, no cgo, works anywhere. |
 | `none` | Disables persistence entirely: nothing is read from or written to disk or the keychain, and every run performs a fresh login/exchange. `--token-store-dir` is ignored. |
 
 The file store lives at `--token-store-dir` (default `$XDG_CACHE_HOME/oidc-token`
@@ -253,8 +251,6 @@ one fresh login, since a keychain miss isn't treated as "check the file
 next." Use `--logout` to explicitly clear a cached entry (keychain items
 can't be removed with `rm` the way file entries can).
 
-No cgo dependency either way.
-
 ### Bootstrap model
 
 First run (cache empty) opens a browser or prints a device code and
@@ -262,17 +258,15 @@ blocks until login completes. Every run after that is served from cache
 or silently refreshed.
 
 If the cache is cold *and* no grant is viable (headless CI with
-`--non-interactive`), it fails fast — it will never print a device-code
+`--non-interactive`), it fails fast; it will never print a device-code
 prompt nobody can see. Warm the cache once, interactively, before wiring
 `oidc-token` into a non-interactive job.
 
-## Recipes
+## Examples
 
-### `frpc` (`auth.oidc.tokenSource.exec`)
+### frpc
 
-frp's client sends the OAuth2 **`access_token`** (not `id_token`) and
-trims all whitespace from the exec output, so use `--token-type
-access_token`:
+Use `oidc-token` as frpc's exec token source:
 
 ```toml
 # frpc.toml
@@ -290,17 +284,12 @@ args = [
 ]
 ```
 
-`--non-interactive` here just suppresses the device-code prompt in
-frpc's log — a cold cache still opens a browser, since frpc's `exec`
-still has a display available even without a TTY. Bootstrap once before
-first use to avoid that popup coming from inside frpc's process tree:
+### kubectl
 
-```sh
-oidc-token --issuer https://id.example.com/ --client-id frpc-client \
-  --token-type access_token --audience frps
-```
-
-### kubectl `ExecCredential` (`--format exec-credential`)
+`--format=exec-credential` emits a genuine Kubernetes `ExecCredential`
+envelope (`apiVersion`, `kind: ExecCredential`, `status.token`, and
+`status.expirationTimestamp` when the expiry is known), exactly what
+kubectl's exec plugin protocol expects, no wrapping needed.
 
 ```yaml
 # ~/.kube/config (users[].user.exec)
@@ -314,29 +303,34 @@ exec:
     - --format=exec-credential
 ```
 
-`--format=exec-credential` emits a genuine Kubernetes `ExecCredential`
-envelope: `apiVersion`, `kind: ExecCredential`, and a `status.token` field
-(plus `status.expirationTimestamp` when the token has a known expiry) —
-exactly what `kubectl`'s exec plugin protocol expects, no wrapping needed.
-The `apiVersion` echoes the one `kubectl` passes via `$KUBERNETES_EXEC_INFO`,
-falling back to `client.authentication.k8s.io/v1` when that env var is
-absent or unparsable.
+### curl
 
-### CI (`--non-interactive`)
+`oidc-token` prints a bare token with no trailing newline (see
+[Output](#output)), so command substitution drops it straight into an
+`Authorization` header:
 
 ```sh
-# One-time, interactive, with a TTY:
-oidc-token --issuer https://id.example.com/ --client-id ci-client
-
-# In the actual CI job, against the warmed cache:
-export OIDC_TOKEN_ISSUER=https://id.example.com/
-export OIDC_TOKEN_CLIENT_ID=ci-client
-oidc-token --non-interactive
+curl -H "Authorization: Bearer $(oidc-token \
+  --issuer https://id.example.com/ --client-id my-public-client)" \
+  https://api.example.com/whoami
 ```
 
-Reuse the same `--token-store-dir` between the bootstrap step and later
-non-interactive runs — an ephemeral runner has no warm cache and will
-fail fast by design.
+### GitHub Actions (token exchange)
+
+In a workflow with `permissions: id-token: write`,
+`--subject-token-source=github-actions` fetches the job's OIDC ID token and
+exchanges it for a token from your issuer, no manual `--subject-token`
+needed. See [Token exchange](#token-exchange-rfc-8693) and
+[Subject token sources](#subject-token-sources) for the mechanics.
+
+```sh
+oidc-token \
+  --issuer https://id.example.com/ \
+  --client-id my-token-exchange-client \
+  --grant-type token-exchange \
+  --subject-token-source github-actions \
+  --audience gtb-abinnovision
+```
 
 ## Build & release
 
@@ -347,19 +341,10 @@ go test ./...
 golangci-lint run
 ```
 
-Every push to `main` runs CI. [release-please](https://github.com/googleapis/release-please)
-opens a release PR tracking conventional commits; merging it creates a
-draft GitHub Release with the next semver tag. GoReleaser then adopts
-that draft (`mode: append`, `use_existing_draft: true`), builds
-darwin/linux x amd64/arm64 archives, attaches them plus checksums, and
-publishes the release. The Homebrew cask is pushed to
-[`abinnovision/homebrew-tap`](https://github.com/abinnovision/homebrew-tap)
-using a short-lived token minted per-release via `oidc-token-cli` itself
-against gh-token-broker's token-exchange endpoint (not a stored PAT).
-
-`.goreleaser.yaml` uses the `homebrew_casks` key with a post-install hook
-that strips the macOS quarantine xattr (`com.apple.quarantine`) from the
-unsigned binary.
+Releases are automated: every push to `main` runs CI, and merging the
+[release-please](https://github.com/googleapis/release-please) PR tags a new
+version and publishes the darwin/linux x amd64/arm64 binaries and the Homebrew
+cask via GoReleaser.
 
 ## License
 
